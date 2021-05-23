@@ -30,13 +30,18 @@ class DoubleMaStrategy(CtaTemplate):
         super().__init__(cta_engine, strategy_name, vt_symbol, setting)
 
         self.bg = BarGenerator(self.on_bar)
-        self.am = ArrayManager()
+        self.am = ArrayManager(
+            size=self.slow_window + 1
+        )
 
     def on_init(self):
         """
         Callback when strategy is inited.
         """
         self.write_log("策略初始化")
+        self.am = ArrayManager(
+            size=self.slow_window + 1
+        )
         self.load_bar(10)
 
     def on_start(self):

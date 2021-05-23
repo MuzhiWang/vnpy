@@ -10,6 +10,7 @@ from vnpy.app.algo_trading import AlgoTradingApp
 from vnpy.app.data_recorder import DataRecorderApp
 from vnpy.app.portfolio_manager import PortfolioManagerApp
 from vnpy.app.portfolio_strategy import PortfolioStrategyApp
+from vnpy.app.chart_wizard import  ChartWizardApp
 
 
 def main():
@@ -29,6 +30,7 @@ def main():
     main_engine.add_app(DataRecorderApp)
     main_engine.add_app(PortfolioManagerApp)
     main_engine.add_app(PortfolioStrategyApp)
+    main_engine.add_app(ChartWizardApp)
 
     main_window = MainWindow(main_engine, event_engine)
     main_window.showMaximized()
