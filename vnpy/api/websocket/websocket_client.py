@@ -8,6 +8,7 @@ from datetime import datetime
 from threading import Lock, Thread
 from time import sleep
 from typing import Optional
+from vnpy.trader.setting import get_settings
 
 import websocket
 
@@ -48,6 +49,7 @@ class WebsocketClient:
         self._worker_thread = None
         self._ping_thread = None
         self._active = False
+        self._ws_internal = get_settings()["websocket_interval_ms"] * 0.001
 
         self.proxy_host = None
         self.proxy_port = None
@@ -214,6 +216,8 @@ class WebsocketClient:
 
                         self._log('recv data: %s', data)
                         self.on_packet(data)
+
+                        sleep(self._ws_internal)
                 # ws is closed before recv function is called
                 # For socket.error, see Issue #1608
                 except (

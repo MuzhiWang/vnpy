@@ -5,8 +5,9 @@ Event-driven framework of vn.py framework.
 from collections import defaultdict
 from queue import Empty, Queue
 from threading import Thread
-from time import sleep
+from time import sleep, time
 from typing import Any, Callable, List
+from vnpy.trader.setting import get_settings
 
 EVENT_TIMER = "eTimer"
 
@@ -22,6 +23,9 @@ class Event:
         """"""
         self.type: str = type
         self.data: Any = data
+
+    def __str__(self):
+        return "type: {}, data: {}".format(self.type, self.data)
 
 
 # Defines handler function to be used in event engine.
@@ -49,6 +53,7 @@ class EventEngine:
         self._timer: Thread = Thread(target=self._run_timer)
         self._handlers: defaultdict = defaultdict(list)
         self._general_handlers: List = []
+        self._log_debug = get_settings()["log_debug"]
 
     def _run(self) -> None:
         """
@@ -74,6 +79,9 @@ class EventEngine:
 
         if self._general_handlers:
             [handler(event) for handler in self._general_handlers]
+
+        if self._log_debug:
+            print("{}, {}".format(time(), event))
 
     def _run_timer(self) -> None:
         """

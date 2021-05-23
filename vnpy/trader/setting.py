@@ -44,6 +44,9 @@ SETTINGS: Dict[str, Any] = {
     "genus.child_port": "",
     "genus.child_sender": "",
     "genus.child_target": "",
+
+    "log_debug": True,
+    "websocket_interval_ms": 200,
 }
 
 # Load global setting from json file.
