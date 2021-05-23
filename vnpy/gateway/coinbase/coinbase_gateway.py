@@ -4,7 +4,7 @@ import json
 import sys
 import time
 from copy import copy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import base64
 import uuid
 import pytz
@@ -804,19 +804,36 @@ class CoinbaseRestApi(RestClient):
         history = []
         count = 300
         start = req.start
+        start_date = req.start.date()
+        end_date = req.end.date()
+        start = datetime(
+            start_date.year,
+            start_date.month,
+            start_date.day,
+            # tzinfo=timezone.utc
+            )
+        final_end = datetime(
+            end_date.year,
+            end_date.month,
+            end_date.day,
+            0,
+            0,
+            0,
+            # tzinfo=timezone.utc
+            )
         path = f"/products/{req.symbol}/candles"
         time_delta = TIMEDELTA_MAP[req.interval]
 
         while True:
             # Break if start time later than end time
-            if start > req.end:
+            if start > final_end:
                 break
 
             # Calculate start and end time for this query
             start_time = start.isoformat()
 
             end = start + time_delta * count
-            end = min(end, req.end)
+            end = min(end, final_end)
             end_time = end.isoformat()
 
             # Create query params
@@ -848,9 +865,9 @@ class CoinbaseRestApi(RestClient):
                 data.reverse()
                 buf = []
 
-                for l in data[1:]:
-                    dt = datetime.fromtimestamp(l[0])
-                    dt = UTC_TZ.localize(dt)
+                for l in data:
+                    dt = datetime.utcfromtimestamp(l[0])
+                    # dt = UTC_TZ.localize(dt)
 
                     o, h, l, c, v = l[1:]
                     bar = BarData(
@@ -875,7 +892,7 @@ class CoinbaseRestApi(RestClient):
                 self.gateway.write_log(msg)
 
                 # Update start time
-                start = bar.datetime + TIMEDELTA_MAP[req.interval]
+                start = bar.datetime
 
         return history
 
