@@ -1,0 +1,4 @@
+# TODO
+    - [Done] Fix WebSocket sleep internal
+    - [Done] Adjust fetch speed for tick data, may use pull instead of listen model
+    - Fix update history for chart_wizard

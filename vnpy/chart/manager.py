@@ -1,5 +1,5 @@
 from typing import Dict, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from vnpy.trader.object import BarData
 
@@ -24,9 +24,14 @@ class BarManager:
         """
         # Put all new bars into dict
         for bar in history:
+            bar.datetime = bar.datetime.astimezone(tz=timezone.utc)
             self._bars[bar.datetime] = bar
 
         # Sort bars dict according to bar.datetime
+        kk = self._bars.keys()
+        # for val in kk:
+        #     if val. <= 0:
+        #         break
         self._bars = dict(sorted(self._bars.items(), key=lambda tp: tp[0]))
 
         # Update map relationiship

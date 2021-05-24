@@ -49,7 +49,7 @@ class WebsocketClient:
         self._worker_thread = None
         self._ping_thread = None
         self._active = False
-        self._ws_internal = get_settings()["websocket_interval_ms"] * 0.001
+        self._ws_internal = get_settings()["websocket_interval_ms"]
 
         self.proxy_host = None
         self.proxy_port = None
@@ -194,12 +194,20 @@ class WebsocketClient:
         Keep running till stop is called.
         """
         try:
+            initial_time = datetime.now().timestamp() * 1000
             while self._active:
                 try:
                     self._ensure_connection()
                     ws = self._ws
                     if ws:
                         text = ws.recv()
+
+                        if self._ws_internal > 0:
+                            now = datetime.now().timestamp() * 1000
+                            if now - initial_time < self._ws_internal:
+                                continue
+                            else:
+                                initial_time = now
 
                         # ws object is closed when recv function is blocking
                         if not text:
@@ -216,8 +224,6 @@ class WebsocketClient:
 
                         self._log('recv data: %s', data)
                         self.on_packet(data)
-
-                        sleep(self._ws_internal)
                 # ws is closed before recv function is called
                 # For socket.error, see Issue #1608
                 except (

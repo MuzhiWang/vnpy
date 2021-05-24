@@ -826,7 +826,7 @@ class CoinbaseRestApi(RestClient):
 
         while True:
             # Break if start time later than end time
-            if start > final_end:
+            if start >= final_end:
                 break
 
             # Calculate start and end time for this query
