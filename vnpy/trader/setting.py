@@ -46,7 +46,7 @@ SETTINGS: Dict[str, Any] = {
     "genus.child_target": "",
 
     "log_debug": True,
-    "log_debug_events": "",
+    "log_debug_exclude_events": "", # split by comma, e.g. "eAccount.,eTick."
     "websocket_interval_ms": 200,
 }
 

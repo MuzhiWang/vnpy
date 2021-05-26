@@ -2,6 +2,8 @@
 Event-driven framework of vn.py framework.
 """
 
+import re
+
 from collections import defaultdict
 from queue import Empty, Queue
 from threading import Thread
@@ -54,7 +56,7 @@ class EventEngine:
         self._handlers: defaultdict = defaultdict(list)
         self._general_handlers: List = []
         self._log_debug = get_settings()["log_debug"]
-        self._log_debug_events = get_settings()["log_debug_events"]
+        self._log_debug_exclude_events = get_settings()["log_debug_exclude_events"].split(",")
 
     def _run(self) -> None:
         """
@@ -82,7 +84,13 @@ class EventEngine:
             [handler(event) for handler in self._general_handlers]
 
         if self._log_debug:
-            if self._log_debug_events is None or self._log_debug_events == "" or event.type in self._log_debug_events:
+            skip = False
+            if self._log_debug_exclude_events is not None:
+                for val in self._log_debug_exclude_events:
+                    if re.match(val, event.type):
+                        skip = True
+                        break
+            if not skip:
                 print("{}, {}".format(time(), event))
 
     def _run_timer(self) -> None:

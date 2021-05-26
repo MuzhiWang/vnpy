@@ -2,6 +2,13 @@
     - [Done] Fix WebSocket sleep internal
     - [Done] Adjust fetch speed for tick data, may use pull instead of listen model
     - Fix update history for chart_wizard
+    - Verify data set for a time range
+    - Build gRPC service for BE
+        - GetBarHistory API
+        - DownloadBarHistory API
+        - RunStrategy API
+    - Build node.js service for UI
+
 
 
 
