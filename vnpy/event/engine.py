@@ -54,6 +54,7 @@ class EventEngine:
         self._handlers: defaultdict = defaultdict(list)
         self._general_handlers: List = []
         self._log_debug = get_settings()["log_debug"]
+        self._log_debug_events = get_settings()["log_debug_events"]
 
     def _run(self) -> None:
         """
@@ -81,7 +82,8 @@ class EventEngine:
             [handler(event) for handler in self._general_handlers]
 
         if self._log_debug:
-            print("{}, {}".format(time(), event))
+            if self._log_debug_events is None or self._log_debug_events == "" or event.type in self._log_debug_events:
+                print("{}, {}".format(time(), event))
 
     def _run_timer(self) -> None:
         """

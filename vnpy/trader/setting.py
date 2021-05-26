@@ -46,6 +46,7 @@ SETTINGS: Dict[str, Any] = {
     "genus.child_target": "",
 
     "log_debug": True,
+    "log_debug_events": "",
     "websocket_interval_ms": 200,
 }
 
