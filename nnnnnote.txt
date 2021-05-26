@@ -14,3 +14,4 @@
 
 # BUG
     - 1621932951.1825268, type: eLog, data: LogData(gateway_name='COINBASE', msg='获取历史数据成功，BTC-USD - 1m，2018-08-10 00:39:00 - 2018-08-10 00:39:00', level=20)
+    - Catch coinbase gw on_packet exception:    Fatal error in coinbase gw on_packet: list index out of range

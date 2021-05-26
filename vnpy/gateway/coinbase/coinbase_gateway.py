@@ -288,11 +288,14 @@ class CoinbaseWebsocketApi(WebsocketClient):
         else:
             callback = self.callbacks.get(packet["type"], None)
             if callback:
-                if packet["type"] not in ["ticker", "snapshot", "l2update"]:
-                    callback(packet)
-                else:
-                    product_id = packet["product_id"]
-                    callback(packet, product_id)
+                try:
+                    if packet["type"] not in ["ticker", "snapshot", "l2update"]:
+                        callback(packet)
+                    else:
+                        product_id = packet["product_id"]
+                        callback(packet, product_id)
+                except Exception as e:
+                    print("\n$$$$$$$$$$$$$$$$$$ Fatal error in coinbase gw on_packet: {} \n".format(e))
 
     def on_orderbook(self, packet: dict, product_id: str):
         """
