@@ -19,7 +19,6 @@ from vnpy.app.portfolio_manager import PortfolioManagerApp
 from vnpy.app.portfolio_strategy import PortfolioStrategyApp
 from vnpy.app.chart_wizard import ChartWizardApp
 
-from vnpy.trader.constant import Interval, Exchange
 from vnpy.trader.object import HistoryRequest
 from server.mapper.mapper import *
 
@@ -28,6 +27,12 @@ class StockDataHandler(tornado.web.RequestHandler):
     def initialize(self, main_engine: MainEngine, event_engine: EventEngine):
         self.main_engine = main_engine
         self.event_engine = event_engine
+
+    def set_default_headers(self):
+        self.set_header("Access-Control-Allow-Origin", "*")
+        self.set_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+        self.set_header("Access-Control-Allow-Headers", "access-control-allow-origin,authorization,content-type,"
+                                                        "x-requested-with")
 
     def post(self):
         data = json.loads(self.request.body)
@@ -48,7 +53,7 @@ class StockDataHandler(tornado.web.RequestHandler):
         start_dt = datetime.utcfromtimestamp(start_ts)
         end_dt = datetime.utcfromtimestamp(end_ts)
 
-        print("sss:{}, ee:{}".format(start_dt, end_dt))
+        print("start_dt:{}, end_dt:{}".format(start_dt, end_dt))
 
         req = HistoryRequest(
             symbol=symbol,
@@ -74,6 +79,11 @@ class StockDataHandler(tornado.web.RequestHandler):
         }
 
         self.write(res_dic)
+
+    def options(self):
+        # no body
+        self.set_status(204)
+        self.finish()
 
 
 def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
