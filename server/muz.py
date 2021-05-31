@@ -1,6 +1,8 @@
 import tornado.ioloop
 import tornado.web
 import threading
+import json
+import time
 from datetime import datetime
 
 from vnpy.event import EventEngine
@@ -19,45 +21,59 @@ from vnpy.app.chart_wizard import ChartWizardApp
 
 from vnpy.trader.constant import Interval, Exchange
 from vnpy.trader.object import HistoryRequest
+from server.mapper.mapper import *
 
 
-class MainHandler(tornado.web.RequestHandler):
+class StockDataHandler(tornado.web.RequestHandler):
     def initialize(self, main_engine: MainEngine, event_engine: EventEngine):
         self.main_engine = main_engine
         self.event_engine = event_engine
 
-    def get(self):
+    def post(self):
+        data = json.loads(self.request.body)
+        if data is None or \
+                "symbol" not in data or \
+                "interval" not in data or \
+                "exchange" not in data or \
+                "start_ts" not in data or \
+                "end_ts" not in data:
+            self.set_status(500, "invalid request body")
+            return
+        symbol = data["symbol"]
+        interval = map_stock_interval_to_internal(data["interval"])
+        exchange = map_stock_exchange_to_internal(data["exchange"])
+        start_ts = data["start_ts"]
+        end_ts = data["end_ts"]
+
+        start_dt = datetime.utcfromtimestamp(start_ts)
+        end_dt = datetime.utcfromtimestamp(end_ts)
+
+        print("sss:{}, ee:{}".format(start_dt, end_dt))
+
         req = HistoryRequest(
-            symbol="BTC-USD",
-            exchange=Exchange.COINBASE,
-            interval=Interval.MINUTE,
-            start=datetime(
-                year=2019,
-                month=8,
-                day=8,
-            ),
-            end=datetime(
-                year=2019,
-                month=8,
-                day=10,
-            ),
+            symbol=symbol,
+            exchange=exchange,
+            interval=interval,
+            start=start_dt,
+            end=end_dt,
         )
 
-        res = self.main_engine.query_history(req, "COINBASE")
+        res = self.main_engine.query_history(req, data["exchange"])
         res_arr = []
         for d in res:
             res_arr.append({
-                "high": d.high_price,
-                "low": d.low_price,
-                "open": d.open_price,
-                "close": d.close_price,
+                "ts": d.datetime.timestamp(),
+                "H": d.high_price,
+                "L": d.low_price,
+                "O": d.open_price,
+                "C": d.close_price,
+                "V": d.volume
             })
         res_dic = {
             "res": res_arr
         }
 
         self.write(res_dic)
-        self.write("Hello, world")
 
 
 def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
@@ -73,7 +89,7 @@ def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
 def start_tornado_app(main_engine: MainEngine, event_engine: EventEngine):
     return tornado.web.Application(
         [
-            (r"/test", MainHandler, {
+            (r"/stock_data", StockDataHandler, {
                 "main_engine": main_engine,
                 "event_engine": event_engine,
             }),
