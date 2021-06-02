@@ -12,28 +12,19 @@ from vnpy.gateway.ctp import CtpGateway
 from vnpy.gateway.binance import BinanceGateway
 from vnpy.gateway.coinbase import CoinbaseGateway
 from vnpy.app.cta_strategy import CtaStrategyApp
-from vnpy.app.cta_backtester import CtaBacktesterApp
+from vnpy.app.cta_backtester import CtaBacktesterApp, BacktesterEngine, APP_NAME as CtaBacktesterAppName
 from vnpy.app.algo_trading import AlgoTradingApp
 from vnpy.app.data_recorder import DataRecorderApp
 from vnpy.app.portfolio_manager import PortfolioManagerApp
 from vnpy.app.portfolio_strategy import PortfolioStrategyApp
 from vnpy.app.chart_wizard import ChartWizardApp
 
-from vnpy.trader.object import HistoryRequest
+from vnpy.trader.object import HistoryRequest, BarData, TradeData
+from server.handler.handler import HandlerBase
 from server.mapper.mapper import *
 
 
-class StockDataHandler(tornado.web.RequestHandler):
-    def initialize(self, main_engine: MainEngine, event_engine: EventEngine):
-        self.main_engine = main_engine
-        self.event_engine = event_engine
-
-    def set_default_headers(self):
-        self.set_header("Access-Control-Allow-Origin", "*")
-        self.set_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        self.set_header("Access-Control-Allow-Headers", "access-control-allow-origin,authorization,content-type,"
-                                                        "x-requested-with")
-
+class StockDataHandler(HandlerBase):
     def post(self):
         data = json.loads(self.request.body)
         if data is None or \
@@ -80,10 +71,40 @@ class StockDataHandler(tornado.web.RequestHandler):
 
         self.write(res_dic)
 
-    def options(self):
-        # no body
-        self.set_status(204)
-        self.finish()
+
+class BacktesterHandler(HandlerBase):
+    def get(self):
+        ctaBTApp: BacktesterEngine = self.main_engine.get_engine(CtaBacktesterAppName)
+        all_trades: list[TradeData] = ctaBTApp.get_all_trades()
+        history: list[BarData] = ctaBTApp.get_history_data()
+
+        history_arr = []
+        trades_arr = []
+        for d in history:
+            history_arr.append({
+                "ts": d.datetime.timestamp(),
+                "H": d.high_price,
+                "L": d.low_price,
+                "O": d.open_price,
+                "C": d.close_price,
+                "V": d.volume
+            })
+        for t in all_trades:
+            trades_arr.append({
+                "price": t.price,
+                "vol": t.volume,
+                "ts": t.datetime.timestamp(),
+                "dir": t.direction.name,
+                "oid": t.orderid,
+                "tid": t.tradeid,
+                "offset": t.offset.name
+            })
+        res_dic = {
+            "history_data": history_arr,
+            "trades_data": trades_arr
+        }
+
+        self.write(res_dic)
 
 
 def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
@@ -100,6 +121,10 @@ def start_tornado_app(main_engine: MainEngine, event_engine: EventEngine):
     return tornado.web.Application(
         [
             (r"/stock_data", StockDataHandler, {
+                "main_engine": main_engine,
+                "event_engine": event_engine,
+            }),
+            (r"/backtester", BacktesterHandler, {
                 "main_engine": main_engine,
                 "event_engine": event_engine,
             }),

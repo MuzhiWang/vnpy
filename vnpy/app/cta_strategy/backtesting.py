@@ -139,7 +139,7 @@ class BacktestingEngine:
         self.active_limit_orders = {}
 
         self.trade_count = 0
-        self.trades = {}
+        self.trades: dict[str, TradeData] = {}
 
         self.logs = []
 
