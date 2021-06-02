@@ -806,7 +806,6 @@ class CoinbaseRestApi(RestClient):
         """"""
         history = []
         count = 300
-        start = req.start
         start_date = req.start.date()
         end_date = req.end.date()
         start = datetime(
@@ -872,7 +871,7 @@ class CoinbaseRestApi(RestClient):
                     dt = datetime.utcfromtimestamp(l[0])
                     # dt = UTC_TZ.localize(dt)
 
-                    o, h, l, c, v = l[1:]
+                    l, h, o, c, v = l[1:]
                     bar = BarData(
                         symbol=req.symbol,
                         exchange=req.exchange,
