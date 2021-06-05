@@ -295,7 +295,7 @@ class CoinbaseWebsocketApi(WebsocketClient):
                         product_id = packet["product_id"]
                         callback(packet, product_id)
                 except Exception as e:
-                    print("\n$$$$$$$$$$$$$$$$$$ Fatal error in coinbase gw on_packet: {} \n".format(e))
+                    print("\n$$$$$$$$$$$$$$$$$$ {} Fatal error in coinbase gw on_packet: {} \n".format(str(datetime.utcnow()), e))
 
     def on_orderbook(self, packet: dict, product_id: str):
         """
