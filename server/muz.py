@@ -1,7 +1,6 @@
 import tornado.ioloop
 import tornado.web
 import threading
-import json
 import time
 from datetime import datetime
 
@@ -19,121 +18,10 @@ from vnpy.app.portfolio_manager import PortfolioManagerApp
 from vnpy.app.portfolio_strategy import PortfolioStrategyApp
 from vnpy.app.chart_wizard import ChartWizardApp
 
-from vnpy.trader.object import HistoryRequest, BarData, TradeData
-from server.handler.handler import HandlerBase
 from server.mapper.mapper import *
-
-
-class StockDataHandler(HandlerBase):
-    def post(self):
-        data = json.loads(self.request.body)
-        if data is None or \
-                "symbol" not in data or \
-                "interval" not in data or \
-                "exchange" not in data or \
-                "start_ts" not in data or \
-                "end_ts" not in data:
-            self.set_status(500, "invalid request body")
-            return
-        symbol = data["symbol"]
-        interval = map_stock_interval_to_internal(data["interval"])
-        exchange = map_stock_exchange_to_internal(data["exchange"])
-        start_ts = data["start_ts"]
-        end_ts = data["end_ts"]
-
-        start_dt = datetime.utcfromtimestamp(start_ts)
-        end_dt = datetime.utcfromtimestamp(end_ts)
-
-        print("start_dt:{}, end_dt:{}".format(start_dt, end_dt))
-
-        req = HistoryRequest(
-            symbol=symbol,
-            exchange=exchange,
-            interval=interval,
-            start=start_dt,
-            end=end_dt,
-        )
-
-        res = self.main_engine.query_history(req, data["exchange"])
-        res_arr = []
-        for d in res:
-            res_arr.append({
-                "ts": d.datetime.timestamp(),
-                "H": d.high_price,
-                "L": d.low_price,
-                "O": d.open_price,
-                "C": d.close_price,
-                "V": d.volume
-            })
-        res_dic = {
-            "res": res_arr
-        }
-
-        self.write(res_dic)
-
-
-class BacktesterHandler(HandlerBase):
-    def get(self):
-        ctaBTApp: BacktesterEngine = self.main_engine.get_engine(CtaBacktesterAppName)
-        all_trades: list[TradeData] = ctaBTApp.get_all_trades()
-        history: list[BarData] = ctaBTApp.get_history_data()
-
-        history_arr = []
-        trades_arr = []
-        for d in history:
-            history_arr.append({
-                "ts": d.datetime.timestamp(),
-                "H": d.high_price,
-                "L": d.low_price,
-                "O": d.open_price,
-                "C": d.close_price,
-                "V": d.volume
-            })
-        for t in all_trades:
-            trades_arr.append({
-                "price": t.price,
-                "vol": t.volume,
-                "ts": t.datetime.timestamp(),
-                "dir": t.direction.name,
-                "oid": t.orderid,
-                "tid": t.tradeid,
-                "offset": t.offset.name
-            })
-        res_dic = {
-            "history_data": history_arr,
-            "trades_data": trades_arr
-        }
-
-        self.write(res_dic)
-
-
-class AccountConnectHandler(HandlerBase):
-    def post(self):
-        data = json.loads(self.request.body)
-        if data is None or \
-                "id" not in data or \
-                "secret" not in data or \
-                "server" not in data or \
-                "passphrase" not in data:
-            self.set_status(500, "invalid request body")
-            return
-
-        id = data["id"]
-        secret = data["secret"]
-        server = data["server"]
-        ps = data["passphrase"]
-        
-        coinbaseGw: CoinbaseGateway = self.main_engine.get_gateway("COINBASE")
-        coinbaseGw.connect({
-            "ID": id,
-            "Secret": secret,
-            "server": server,
-            "passphrase": ps,
-            "会话数": 3,
-            "proxy_host": "",
-            "proxy_port": ""
-        })
-
+from server.handler.marketplace import StockDataHandler
+from server.handler.account import AccountConnectHandler
+from server.handler.backtester import BacktesterHandler
 
 def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
     """Start VN Trader"""
