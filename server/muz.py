@@ -8,7 +8,7 @@ from datetime import datetime
 from vnpy.event import EventEngine
 from vnpy.trader.engine import MainEngine
 from vnpy.trader.ui import MainWindow, create_qapp
-from vnpy.gateway.ctp import CtpGateway
+# from vnpy.gateway.ctp import CtpGateway
 from vnpy.gateway.binance import BinanceGateway
 from vnpy.gateway.coinbase import CoinbaseGateway
 from vnpy.app.cta_strategy import CtaStrategyApp
@@ -107,6 +107,34 @@ class BacktesterHandler(HandlerBase):
         self.write(res_dic)
 
 
+class AccountConnectHandler(HandlerBase):
+    def post(self):
+        data = json.loads(self.request.body)
+        if data is None or \
+                "id" not in data or \
+                "secret" not in data or \
+                "server" not in data or \
+                "passphrase" not in data:
+            self.set_status(500, "invalid request body")
+            return
+
+        id = data["id"]
+        secret = data["secret"]
+        server = data["server"]
+        ps = data["passphrase"]
+        
+        coinbaseGw: CoinbaseGateway = self.main_engine.get_gateway("COINBASE")
+        coinbaseGw.connect({
+            "ID": id,
+            "Secret": secret,
+            "server": server,
+            "passphrase": ps,
+            "会话数": 3,
+            "proxy_host": "",
+            "proxy_port": ""
+        })
+
+
 def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
     """Start VN Trader"""
     qapp = create_qapp()
@@ -120,11 +148,15 @@ def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
 def start_tornado_app(main_engine: MainEngine, event_engine: EventEngine):
     return tornado.web.Application(
         [
-            (r"/stock_data", StockDataHandler, {
+            (r"/marketplace/stock_data", StockDataHandler, {
                 "main_engine": main_engine,
                 "event_engine": event_engine,
             }),
             (r"/backtester", BacktesterHandler, {
+                "main_engine": main_engine,
+                "event_engine": event_engine,
+            }),
+            (r"/account/connect", AccountConnectHandler, {
                 "main_engine": main_engine,
                 "event_engine": event_engine,
             }),
@@ -136,7 +168,7 @@ def main():
     event_engine = EventEngine()
     main_engine = MainEngine(event_engine)
 
-    main_engine.add_gateway(CtpGateway)
+    # main_engine.add_gateway(CtpGateway)
     main_engine.add_gateway(BinanceGateway)
     main_engine.add_gateway(CoinbaseGateway)
 
@@ -148,8 +180,9 @@ def main():
     main_engine.add_app(PortfolioStrategyApp)
     main_engine.add_app(ChartWizardApp)
 
-    vnpy_thread = threading.Thread(target=start_vnpy_app, args=[main_engine, event_engine], daemon=True)
-    vnpy_thread.start()
+    # Disable VNPY FE
+    # vnpy_thread = threading.Thread(target=start_vnpy_app, args=[main_engine, event_engine], daemon=True)
+    # vnpy_thread.start()
 
     tornado_app = start_tornado_app(main_engine, event_engine)
     tornado_app.listen(9082)
