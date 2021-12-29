@@ -83,13 +83,13 @@ class EventEngine:
         if self._general_handlers:
             [handler(event) for handler in self._general_handlers]
 
+        # print("log debug ex: {}", self._log_debug_exclude_events)
         if self._log_debug:
             skip = False
-            if self._log_debug_exclude_events is not None:
-                for val in self._log_debug_exclude_events:
-                    if re.match(val, event.type):
-                        skip = True
-                        break
+            for val in self._log_debug_exclude_events:
+                if val != "" and re.match(val, event.type):
+                    skip = True
+                    break
             if not skip:
                 print("{}, {}".format(time(), event))
 

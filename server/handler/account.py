@@ -28,3 +28,5 @@ class AccountConnectHandler(HandlerBase):
             "proxy_host": "",
             "proxy_port": ""
         })
+        
+        self.write("account connected")

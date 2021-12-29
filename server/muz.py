@@ -20,7 +20,7 @@ from vnpy.app.portfolio_strategy import PortfolioStrategyApp
 from vnpy.app.chart_wizard import ChartWizardApp
 
 from server.mapper.mapper import *
-from server.handler.marketplace import StockDataHandler
+from server.handler.marketplace import DownloadDataHandler, StockDataHandler
 from server.handler.account import AccountConnectHandler
 from server.handler.backtester import BacktesterHandler
 
@@ -38,6 +38,10 @@ def start_tornado_app(main_engine: MainEngine, event_engine: EventEngine):
     return tornado.web.Application(
         [
             (r"/marketplace/stock_data", StockDataHandler, {
+                "main_engine": main_engine,
+                "event_engine": event_engine,
+            }),
+            (r"/marketplace/download_data", DownloadDataHandler, {
                 "main_engine": main_engine,
                 "event_engine": event_engine,
             }),
@@ -70,12 +74,14 @@ def main():
     main_engine.add_app(ChartWizardApp)
 
     args = sys.argv
-    if len(args) > 1 and args[0] == True:
+    print(args)
+    if len(args) > 1 and args[1].lower() == "true":
         vnpy_thread = threading.Thread(target=start_vnpy_app, args=[main_engine, event_engine], daemon=True)
         vnpy_thread.start()
 
     tornado_app = start_tornado_app(main_engine, event_engine)
     tornado_app.listen(9082)
+    print("tornado service started")
     tornado.ioloop.IOLoop.current().start()
 
 
