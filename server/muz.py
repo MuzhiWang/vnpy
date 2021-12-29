@@ -2,6 +2,7 @@ import tornado.ioloop
 import tornado.web
 import threading
 import time
+import sys
 from datetime import datetime
 
 from vnpy.event import EventEngine
@@ -68,9 +69,10 @@ def main():
     main_engine.add_app(PortfolioStrategyApp)
     main_engine.add_app(ChartWizardApp)
 
-    # Disable VNPY FE
-    # vnpy_thread = threading.Thread(target=start_vnpy_app, args=[main_engine, event_engine], daemon=True)
-    # vnpy_thread.start()
+    args = sys.argv
+    if len(args) > 1 and args[0] == True:
+        vnpy_thread = threading.Thread(target=start_vnpy_app, args=[main_engine, event_engine], daemon=True)
+        vnpy_thread.start()
 
     tornado_app = start_tornado_app(main_engine, event_engine)
     tornado_app.listen(9082)
