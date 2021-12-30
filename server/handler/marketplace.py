@@ -1,5 +1,6 @@
 from server.handler.handler import HandlerBase
 from server.mapper.mapper import *
+from server.utils.tornado_utils import write_error
 from vnpy.app.cta_backtester.engine import BacktesterEngine
 from vnpy.app.cta_backtester.engine import APP_NAME as BT_ENGINE_APP_NAME
 from vnpy.trader.object import HistoryRequest, BarData, TradeData
@@ -16,8 +17,9 @@ class StockDataHandler(HandlerBase):
                 "exchange" not in data or \
                 "start_ts" not in data or \
                 "end_ts" not in data:
-            self.set_status(500, "invalid request body")
+            write_error(self, 400, "invalid request")
             return
+        
         symbol = data["symbol"]
         interval = map_stock_interval_to_internal(data["interval"])
         exchange = map_stock_exchange_to_internal(data["exchange"])
@@ -55,7 +57,6 @@ class StockDataHandler(HandlerBase):
         self.write(res_dic)
 
 
-
 class DownloadDataHandler(HandlerBase):
     def post(self):
         data = json.loads(self.request.body)
@@ -65,7 +66,7 @@ class DownloadDataHandler(HandlerBase):
                 "interval" not in data or \
                 "start_ts" not in data or \
                 "end_ts" not in data:
-            self.set_status(500, "invalid request body")
+            write_error(self, 400, "invalid request")
             return
 
         symbol = data["symbol"]

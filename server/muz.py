@@ -22,7 +22,7 @@ from vnpy.app.chart_wizard import ChartWizardApp
 from server.mapper.mapper import *
 from server.handler.marketplace import DownloadDataHandler, StockDataHandler
 from server.handler.account import AccountConnectHandler
-from server.handler.backtester import BacktesterHandler
+from server.handler.backtester import GetBacktestResultHandler, RunBacktestHandler
 
 def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
     """Start VN Trader"""
@@ -45,7 +45,11 @@ def start_tornado_app(main_engine: MainEngine, event_engine: EventEngine):
                 "main_engine": main_engine,
                 "event_engine": event_engine,
             }),
-            (r"/backtester", BacktesterHandler, {
+            (r"/backtester/result", GetBacktestResultHandler, {
+                "main_engine": main_engine,
+                "event_engine": event_engine,
+            }),
+            (r"/backtester/run", RunBacktestHandler, {
                 "main_engine": main_engine,
                 "event_engine": event_engine,
             }),

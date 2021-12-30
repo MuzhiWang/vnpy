@@ -1,4 +1,5 @@
 from server.handler.handler import HandlerBase
+from server.utils.tornado_utils import write_error
 from vnpy.gateway.coinbase import CoinbaseGateway
 import json
 
@@ -10,7 +11,7 @@ class AccountConnectHandler(HandlerBase):
                 "secret" not in data or \
                 "server" not in data or \
                 "passphrase" not in data:
-            self.set_status(500, "invalid request body")
+            write_error(self, 400, "invalid request")
             return
 
         id = data["id"]
