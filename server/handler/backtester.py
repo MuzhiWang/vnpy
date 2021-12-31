@@ -1,5 +1,8 @@
-import datetime
+from datetime import datetime
 import json
+from numpy import int32, int64
+
+from pandas.core.frame import DataFrame
 from server.mapper.mapper import *
 from server.utils.tornado_utils import *
 from vnpy.app.cta_backtester import CtaBacktesterApp, BacktesterEngine, APP_NAME as CtaBacktesterAppName
@@ -12,6 +15,16 @@ class GetBacktestResultHandler(HandlerBase):
         ctaBTApp: BacktesterEngine = self.main_engine.get_engine(CtaBacktesterAppName)
         all_trades: list[TradeData] = ctaBTApp.get_all_trades()
         history: list[BarData] = ctaBTApp.get_history_data()
+        dailyResults = ctaBTApp.get_result_df().to_json(date_format='epoch')
+        print(dailyResults)
+        resultStatistic = ctaBTApp.get_result_statistics()
+        print(resultStatistic)
+        resultStatistic["start_date"] = resultStatistic["start_date"].strftime("%Y-%m-%d")
+        resultStatistic["end_date"] = resultStatistic["end_date"].strftime("%Y-%m-%d")
+        for key, val in resultStatistic.items():
+            if isinstance(val, int32) or isinstance(val, int64):
+                resultStatistic[key] = int(val)
+        print(resultStatistic)
 
         history_arr = []
         trades_arr = []
@@ -36,7 +49,9 @@ class GetBacktestResultHandler(HandlerBase):
             })
         res_dic = {
             "history_data": history_arr,
-            "trades_data": trades_arr
+            "trades_data": trades_arr,
+            "statistic_result": resultStatistic,
+            "daily_result": dailyResults
         }
 
         self.write(res_dic)
@@ -66,8 +81,10 @@ class RunBacktestHandler(HandlerBase):
         interval = map_stock_interval_to_internal(data["interval"])
         exchange = map_stock_exchange_to_internal(data["exchange"])
         vt_symbol: str = TradeUtility.generate_vt_symbol(symbol=symbol, exchange=exchange)
-        start: datetime = data["start_ts"]
-        end: datetime = data["end_ts"]
+        start_ts = data["start_ts"]
+        end_ts = data["end_ts"]
+        start_dt = datetime.utcfromtimestamp(start_ts)
+        end_dt = datetime.utcfromtimestamp(end_ts)
         rate: float = data["rate"]
         slippage: float = data["slippage"]
         size: int = data["size"]
@@ -77,6 +94,7 @@ class RunBacktestHandler(HandlerBase):
         setting: dict = data["setting"]
         
         print("run backtesting request: {}".format(data))
+        print("start_dt:{}, end_dt:{}".format(start_dt, end_dt))
         
         ctaBTEngine: BacktesterEngine = self.main_engine.get_engine(CtaBacktesterAppName)
         ctaBTEngine.init_engine()
@@ -85,8 +103,8 @@ class RunBacktestHandler(HandlerBase):
             class_name=class_name,
             vt_symbol=vt_symbol,
             interval=interval,
-            start=start,
-            end=end,
+            start=start_dt,
+            end=end_dt,
             rate=rate,
             slippage=slippage,
             size=size,
@@ -107,3 +125,4 @@ class RunBacktestHandler(HandlerBase):
         #     EVENT_CTA_STRATEGY, callable
         # )
         pass
+
