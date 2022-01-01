@@ -2,6 +2,7 @@
 Global setting of VN Trader.
 """
 
+import os
 from logging import CRITICAL
 from typing import Dict, Any
 from tzlocal import get_localzone
@@ -54,6 +55,10 @@ SETTINGS: Dict[str, Any] = {
 SETTING_FILENAME: str = "vt_setting.json"
 SETTINGS.update(load_json(SETTING_FILENAME))
 
+if SETTINGS["database.host"] == "localhost":
+    docker_host = os.getenv("DOCKER_HOST")
+    if docker_host is not None and docker_host != "":
+        SETTINGS["database.host"] = "host.docker.internal"
 
 def get_settings(prefix: str = "") -> Dict[str, Any]:
     prefix_length = len(prefix)
