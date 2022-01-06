@@ -16,11 +16,14 @@ class GetBacktestResultHandler(HandlerBase):
         all_trades: list[TradeData] = ctaBTApp.get_all_trades()
         history: list[BarData] = ctaBTApp.get_history_data()
         dailyResults = ctaBTApp.get_result_df().to_json(date_format='epoch')
-        print(dailyResults)
+        # print(dailyResults)
         resultStatistic = ctaBTApp.get_result_statistics()
-        print(resultStatistic)
-        resultStatistic["start_date"] = resultStatistic["start_date"].strftime("%Y-%m-%d")
-        resultStatistic["end_date"] = resultStatistic["end_date"].strftime("%Y-%m-%d")
+        # print(resultStatistic)
+        
+        if not isinstance(resultStatistic["start_date"], str):
+            resultStatistic["start_date"] = resultStatistic["start_date"].strftime("%Y-%m-%d")
+        if not isinstance(resultStatistic["end_date"], str):
+            resultStatistic["end_date"] = resultStatistic["end_date"].strftime("%Y-%m-%d")
         for key, val in resultStatistic.items():
             if isinstance(val, int32) or isinstance(val, int64):
                 resultStatistic[key] = int(val)
@@ -93,8 +96,8 @@ class RunBacktestHandler(HandlerBase):
         inverse: bool = data["inverse"]
         setting: dict = data["setting"]
         
-        print("run backtesting request: {}".format(data))
-        print("start_dt:{}, end_dt:{}".format(start_dt, end_dt))
+        # print("run backtesting request: {}".format(data))
+        # print("start_dt:{}, end_dt:{}".format(start_dt, end_dt))
         
         ctaBTEngine: BacktesterEngine = self.main_engine.get_engine(CtaBacktesterAppName)
         ctaBTEngine.init_engine()
