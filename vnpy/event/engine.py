@@ -9,7 +9,11 @@ from queue import Empty, Queue
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, List
+
+from numpy import array
 from vnpy.trader.setting import get_settings
+from kafka import KafkaProducer
+import json
 
 EVENT_TIMER = "eTimer"
 
@@ -58,6 +62,13 @@ class EventEngine:
         self._log_debug = get_settings()["log_debug"]
         self._log_debug_exclude_events = get_settings()["log_debug_exclude_events"].split(",")
 
+        self._kafka_producer = KafkaProducer(
+            bootstrap_servers='localhost:19092',
+            # security_protocol="SASL_SSL",
+            # ssl_context=context,
+            value_serializer=lambda x: json.dumps(x).encode('utf-8')
+        )
+        
     def _run(self) -> None:
         """
         Get event from queue and then process it.
@@ -91,7 +102,10 @@ class EventEngine:
                     skip = True
                     break
             if not skip:
-                print("{}, {}".format(time(), event))
+                event_msg = "{}, {}".format(time(), event)
+                self._kafka_producer.send("EVENTLOGGG", event_msg)
+                print(event_msg)
+
 
     def _run_timer(self) -> None:
         """
@@ -159,3 +173,4 @@ class EventEngine:
         """
         if handler in self._general_handlers:
             self._general_handlers.remove(handler)
+    

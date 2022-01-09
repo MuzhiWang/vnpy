@@ -1,9 +1,10 @@
+import json
 import tornado.ioloop
 import tornado.web
 import threading
 import time
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from vnpy.event import EventEngine
 from vnpy.trader.engine import MainEngine
@@ -23,6 +24,8 @@ from server.mapper.mapper import *
 from server.handler.marketplace import DownloadDataHandler, StockDataHandler
 from server.handler.account import AccountConnectHandler
 from server.handler.backtester import GetBacktestResultHandler, RunBacktestHandler
+from server.handler.log_event import LogEventWebSocketHandler
+
 
 def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
     """Start VN Trader"""
@@ -57,9 +60,12 @@ def start_tornado_app(main_engine: MainEngine, event_engine: EventEngine):
                 "main_engine": main_engine,
                 "event_engine": event_engine,
             }),
+            (r"/event_log", LogEventWebSocketHandler, {
+                "main_engine": main_engine,
+                "event_engine": event_engine,
+            })
         ]
     )
-
 
 def main():
     event_engine = EventEngine()
@@ -85,9 +91,12 @@ def main():
 
     tornado_app = start_tornado_app(main_engine, event_engine)
     tornado_app.listen(9082)
+    tornado.ioloop.IOLoop.instance().add_timeout(
+        timedelta(seconds=1),
+        LogEventWebSocketHandler.write_to_clients)
+    
     print("tornado service started")
-    tornado.ioloop.IOLoop.current().start()
-
+    tornado.ioloop.IOLoop.instance().start()
 
 if __name__ == "__main__":
     main()
