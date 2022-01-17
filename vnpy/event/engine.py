@@ -11,6 +11,7 @@ from time import sleep, time
 from typing import Any, Callable, List
 
 from numpy import array
+from vnpy.api import da
 from vnpy.trader.setting import get_settings
 from kafka import KafkaProducer
 import json
@@ -102,9 +103,10 @@ class EventEngine:
                     skip = True
                     break
             if not skip:
-                event_msg = "{}, {}".format(time(), event)
-                self._kafka_producer.send("EVENTLOGGG", event_msg)
+                # event_msg = "ts: {}, {}".format(time(), event)
+                event_msg = str(event)
                 print(event_msg)
+                self._kafka_producer.send("EVENTLOGGG", event_msg)
 
 
     def _run_timer(self) -> None:

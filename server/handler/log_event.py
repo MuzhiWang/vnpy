@@ -42,6 +42,7 @@ class LogEventWebSocketHandler(WsHandlerBase):
     
     def on_close(self) -> None:
         print("log event websocket closed")
+        self._clients.remove(self)
         return super().on_close()
     
     def check_origin(self, origin: str) -> bool:
@@ -54,10 +55,9 @@ class LogEventWebSocketHandler(WsHandlerBase):
     @classmethod
     def write_to_clients(cls):
         try:
-            print("writing to clients")
-            print(len(cls._clients))
-            for client in cls._clients:
-                print("start client 1")
+            print("writing to {} clients".format(len(cls._clients)))
+            for idx, client in enumerate(cls._clients):
+                print("start client {}".format(idx))
                 while(cls._event_queue):
                     client._write_message(cls._event_queue.pop())
         finally:
@@ -77,8 +77,6 @@ class LogEventWebSocketHandler(WsHandlerBase):
         for msg in cls._consumer:
             print("*********************************")
             bytt = bytes(json.dumps(msg), "utf-8")
-            # for c in cls._clients:
-            #     c.write_message(bytt)
             cls._event_queue.appendleft(bytt)
             print(bytt)
             

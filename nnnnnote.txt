@@ -37,4 +37,5 @@
 
 # Docker test
     - docker build -t muz_test1 -f Dockerfile-test .
+    - docker-compose -f docker-compose-kafka-local.yml up --build --force-recreate
     - 

@@ -4,6 +4,7 @@ Basic data structure used for general trading function in VN Trader.
 
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from logging import INFO
 
 from .constant import Direction, Exchange, Interval, Offset, Status, Product, OptionType, OrderType
