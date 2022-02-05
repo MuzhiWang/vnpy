@@ -36,5 +36,9 @@ _templates
 # Misc
 .DS_Store
 
+# Docker
+kafka/zookeeper/
+
+
 # Private
 vnpy/app/cta_strategy/strategies/sma_grid_mix_strategy.py

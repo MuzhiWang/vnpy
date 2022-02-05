@@ -1,0 +1,48 @@
+version: '3.3'
+
+networks: 
+  my_kafka:
+    name: my_kafka
+
+services:
+  zookeeper:
+    image: zookeeper
+    restart: always
+    hostname: zookeeper
+    container_name: zookeeper
+    volumes:
+      - ./zookeeper/data:/data
+      - ./zookeeper/datalog:/datalog
+    ports:
+      - "2181:2181"
+    expose:
+      - "2181"
+    networks:
+      - my_kafka
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    #  ZOO_MY_ID: 1
+    #  ZOO_SERVERS: server.1=zoo:2888:3888;2181
+
+  broker:
+    build: .
+    #dockerfile: Dockerfile
+    container_name: broker
+    restart: always
+    volumes:
+      - ./config:/kafka/config
+    ports:
+      - "19092:19092"
+    expose:
+      - "19092"
+    depends_on:
+      - zookeeper
+    networks:
+      - my_kafka
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092,CONNECTIONS_FROM_HOST://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONNECTIONS_FROM_HOST:PLAINTEXTL_SSL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+

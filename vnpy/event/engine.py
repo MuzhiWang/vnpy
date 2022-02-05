@@ -9,11 +9,11 @@ from queue import Empty, Queue
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, List
+from kafka.errors import TopicAlreadyExistsError
 
-from numpy import array
-from vnpy.api import da
 from vnpy.trader.setting import get_settings
 from kafka import KafkaProducer
+from kafka.admin import KafkaAdminClient, NewTopic
 import json
 
 EVENT_TIMER = "eTimer"
@@ -63,6 +63,25 @@ class EventEngine:
         self._log_debug = get_settings()["log_debug"]
         self._log_debug_exclude_events = get_settings()["log_debug_exclude_events"].split(",")
 
+        self._kafka_event_log_topic = "EVENTLOGGG"
+        
+        try:
+            admin_client = KafkaAdminClient(
+                bootstrap_servers='localhost:19092',
+                client_id='vnpy_muzhi'
+            )
+            topic_list = []
+            topic_list.append(
+                NewTopic(
+                    name=self._kafka_event_log_topic,
+                    num_partitions=1,
+                    replication_factor=1
+                )
+            )
+            admin_client.create_topics(new_topics=topic_list, validate_only=False)
+        except TopicAlreadyExistsError:
+            print("kafka topic {} already exists".format(self._kafka_event_log_topic))
+        
         self._kafka_producer = KafkaProducer(
             bootstrap_servers='localhost:19092',
             # security_protocol="SASL_SSL",
@@ -106,7 +125,7 @@ class EventEngine:
                 # event_msg = "ts: {}, {}".format(time(), event)
                 event_msg = str(event)
                 print(event_msg)
-                self._kafka_producer.send("EVENTLOGGG", event_msg)
+                self._kafka_producer.send(self._kafka_event_log_topic, event_msg)
 
 
     def _run_timer(self) -> None:
