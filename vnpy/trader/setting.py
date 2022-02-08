@@ -49,16 +49,23 @@ SETTINGS: Dict[str, Any] = {
     "log_debug": True,
     "log_debug_exclude_events": "eTimer,eAccount.*,eContract.", # split by comma, e.g. "eAccount.,eTick."
     "websocket_interval_ms": 200,
+    
+    "kafka_broker_host_port": "localhost:19092",
 }
 
 # Load global setting from json file.
 SETTING_FILENAME: str = "vt_setting.json"
 SETTINGS.update(load_json(SETTING_FILENAME))
 
+docker_kafka_host = os.getenv("DOCKER_KAFKA_HOST_PORT")
+if docker_kafka_host is not None and docker_kafka_host != "":
+    SETTINGS["kafka_broker_host_port"] = docker_kafka_host
+
 if SETTINGS["database.host"] == "localhost":
     docker_host = os.getenv("DOCKER_HOST")
     if docker_host is not None and docker_host != "":
-        SETTINGS["database.host"] = "host.docker.internal"
+        SETTINGS["database.host"] = docker_host
+
 
 def get_settings(prefix: str = "") -> Dict[str, Any]:
     prefix_length = len(prefix)

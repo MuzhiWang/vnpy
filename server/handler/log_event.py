@@ -13,12 +13,14 @@ import tornado.ioloop
 from server.handler.handler import WsHandlerBase
 from vnpy.event.engine import EventEngine
 from vnpy.trader.engine import MainEngine
+from vnpy.trader.setting import get_settings
 
 class LogEventWebSocketHandler(WsHandlerBase):
     
     _clients: List[WebSocketHandler] = []
     _consumer: KafkaConsumer = KafkaConsumer("EVENTLOGGG",
-                            bootstrap_servers='localhost:19092',
+                            bootstrap_servers=get_settings()["kafka_broker_host_port"],
+                            api_version=(0, 11, 5),
                             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
                         )
     _event_queue: deque = deque(["initialize info",], maxlen=10000)

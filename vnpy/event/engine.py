@@ -63,11 +63,13 @@ class EventEngine:
         self._log_debug = get_settings()["log_debug"]
         self._log_debug_exclude_events = get_settings()["log_debug_exclude_events"].split(",")
 
+        self._kafka_host_port = get_settings()["kafka_broker_host_port"]
         self._kafka_event_log_topic = "EVENTLOGGG"
         
         try:
             admin_client = KafkaAdminClient(
-                bootstrap_servers='localhost:19092',
+                bootstrap_servers=self._kafka_host_port,
+                api_version=(0, 11, 5),
                 client_id='vnpy_muzhi'
             )
             topic_list = []
@@ -83,7 +85,8 @@ class EventEngine:
             print("kafka topic {} already exists".format(self._kafka_event_log_topic))
         
         self._kafka_producer = KafkaProducer(
-            bootstrap_servers='localhost:19092',
+            bootstrap_servers=self._kafka_host_port,
+            api_version=(0, 11, 5),
             # security_protocol="SASL_SSL",
             # ssl_context=context,
             value_serializer=lambda x: json.dumps(x).encode('utf-8')

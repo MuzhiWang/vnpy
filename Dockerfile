@@ -47,6 +47,7 @@ RUN pip install ta-lib
 RUN pip install -r ./requirements-manual.txt
 
 ENV DOCKER_HOST "host.docker.internal"
+ENV DOCKER_KAFKA_HOST_PORT "broker:9092"
 
 # CMD ["python", "-m", "server.muz"]
 ENTRYPOINT python -m server.muz
