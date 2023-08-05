@@ -1,4 +1,4 @@
-FROM java:openjdk-8-jre
+FROM openjdk:8
 
 LABEL maintainer="wmz669082@gmail.com"
 

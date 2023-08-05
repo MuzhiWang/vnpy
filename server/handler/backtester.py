@@ -118,7 +118,7 @@ class RunBacktestHandler(HandlerBase):
         )
         
         res_dic = {
-            "run_backtesting_succceeded": succeeded
+            "run_backtesting_succeeded": succeeded
         }
         self.write(res_dic)
     

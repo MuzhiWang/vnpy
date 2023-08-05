@@ -35,6 +35,9 @@
     - pip install .\files\TA_Lib-0.4.22-cp37-cp37m-win_amd64.whl
     - pip install .\files\quickfix-1.15.1-cp37-cp37m-win_amd64.whl
 
+# Local test vnpy application
+    - python -m server.muz True
+
 # Docker test
     - docker build -t muz_test1 -f Dockerfile-test .
     - docker-compose -f docker-compose-kafka-local.yml up --build --force-recreate
