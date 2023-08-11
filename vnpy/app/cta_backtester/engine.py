@@ -228,6 +228,10 @@ class BacktesterEngine(BaseEngine):
 
         return True
 
+    def stop_backtesting(self):
+        if self.thread:
+            self.thread.join()
+
     def get_result_df(self):
         """"""
         return self.result_df

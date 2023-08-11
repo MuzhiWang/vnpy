@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import timedelta
 import threading
 import json
@@ -26,6 +27,8 @@ class LogEventWebSocketHandler(WsHandlerBase):
     _event_queue: deque = deque(["initialize info",], maxlen=10000)
     # _io_loop = tornado.ioloop.IOLoop.current()
     # asyncio.set_event_loop(io_loop)
+
+    _count = 1
     
     def initialize(self, main_engine: MainEngine, event_engine: EventEngine):
         self.main_engine = main_engine
@@ -56,10 +59,13 @@ class LogEventWebSocketHandler(WsHandlerBase):
     
     @classmethod
     def write_to_clients(cls):
+        cls._count += 1
         try:
-            print("writing to {} clients".format(len(cls._clients)))
+            if cls._count % 10 == 0:
+                print("writing to {} clients".format(len(cls._clients)))
             for idx, client in enumerate(cls._clients):
-                print("start client {}".format(idx))
+                if cls._count % 10 == 0:
+                    print("start client {}".format(idx))
                 while(cls._event_queue):
                     client._write_message(cls._event_queue.pop())
         finally:

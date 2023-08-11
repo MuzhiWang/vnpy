@@ -15,7 +15,12 @@ class GetBacktestResultHandler(HandlerBase):
         ctaBTApp: BacktesterEngine = self.main_engine.get_engine(CtaBacktesterAppName)
         all_trades: list[TradeData] = ctaBTApp.get_all_trades()
         history: list[BarData] = ctaBTApp.get_history_data()
-        dailyResults = ctaBTApp.get_result_df().to_json(date_format='epoch')
+        dailyResultsDf = ctaBTApp.get_result_df()
+        if dailyResultsDf is None:
+            self.write({})
+            return
+
+        dailyResults = dailyResultsDf.to_json(date_format='epoch')
         # print(dailyResults)
         resultStatistic = ctaBTApp.get_result_statistics()
         # print(resultStatistic)
@@ -121,7 +126,7 @@ class RunBacktestHandler(HandlerBase):
             "run_backtesting_succeeded": succeeded
         }
         self.write(res_dic)
-    
+
     
     def register_events(self):
         # self.event_engine.register(
@@ -129,3 +134,9 @@ class RunBacktestHandler(HandlerBase):
         # )
         pass
 
+
+class StopBacktestHandler(HandlerBase):
+
+    def post(self):
+        ctaBTEngine: BacktesterEngine = self.main_engine.get_engine(CtaBacktesterAppName)
+        ctaBTEngine.stop_backtesting()
