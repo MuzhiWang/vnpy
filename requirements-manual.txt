@@ -29,3 +29,6 @@ quickfix
 tornado
 kafka-python
 urllib3==1.26.6
+lxml
+tushare
+akshare

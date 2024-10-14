@@ -29,3 +29,7 @@ tigeropen==1.1.9
 tornado==6.1
 tzlocal==2.0.0
 WMI==1.4.9
+urllib3==1.26.6
+lxml
+tushare
+akshare

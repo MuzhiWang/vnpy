@@ -12,14 +12,24 @@
         - [NOT TO DO] Add group by 1m/5m/30m/1h/6h/1d/1w etc
         - Add P&L etc
     - [DONE] Fix DoubleSMA strategy double trades orders issue
-    - Verify or add tests for ArrayManager
-    - Verify or add tests for BarGenerator
+    - [P2] Verify or add tests for ArrayManager
+    - [P2] Verify or add tests for BarGenerator
     - Extend BarGenerator
     - Add Grids strategy
     - Add First personal strategy by doc
     - Simulation test system
-    - Email/message event engine
-    - Real marketplace system
+    - [P3] Email/message event engine
+    - [P2] Real marketplace system
+    - [P1] Storage & data sync system
+        - Write daily in csv files
+        - DockDB: https://duckdb.org/
+    - [P0] Select multiple stocks
+        - BE
+        - UI
+    - [P0] Stock selection
+        - BE
+        - UI
+
 
 
 

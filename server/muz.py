@@ -11,6 +11,7 @@ from vnpy.trader.engine import MainEngine
 from vnpy.trader.ui import MainWindow, create_qapp
 # from vnpy.gateway.ctp import CtpGateway
 from vnpy.gateway.binance import BinanceGateway
+from vnpy.gateway.tushare import TushareGateway
 from vnpy.gateway.coinbase import CoinbaseGateway
 from vnpy.app.cta_strategy import CtaStrategyApp
 from vnpy.app.cta_backtester import CtaBacktesterApp, BacktesterEngine, APP_NAME as CtaBacktesterAppName
@@ -78,6 +79,7 @@ def main():
     # main_engine.add_gateway(CtpGateway)
     main_engine.add_gateway(BinanceGateway)
     main_engine.add_gateway(CoinbaseGateway)
+    main_engine.add_gateway(TushareGateway)
 
     main_engine.add_app(CtaStrategyApp)
     main_engine.add_app(CtaBacktesterApp)
@@ -86,6 +88,26 @@ def main():
     main_engine.add_app(PortfolioManagerApp)
     main_engine.add_app(PortfolioStrategyApp)
     main_engine.add_app(ChartWizardApp)
+
+    tushare_gw = main_engine.get_gateway('TUSHARE')
+    from vnpy.trader.object import HistoryRequest
+    res = tushare_gw.query_history(HistoryRequest(
+        start=datetime.fromisoformat('2022-10-10'),
+        end=datetime.fromisoformat('2023-05-10'),
+        symbol='xxx',
+        exchange=Exchange.SSE,
+    ))
+
+    print("\n=================================\n")
+    print(res)
+
+    # import akshare as ak
+    # stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol="000001", period="daily", start_date="20170301", end_date='20210907',
+    #                                         adjust="")
+    # print("\n================ akshare =================\n")
+    # print(stock_zh_a_hist_df)
+
+
 
     args = sys.argv
     print(args)
