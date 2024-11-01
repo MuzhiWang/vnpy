@@ -36,3 +36,4 @@ urllib3==1.26.6
 lxml
 tushare
 akshare
+polygon-api-client

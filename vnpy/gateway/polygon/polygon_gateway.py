@@ -1,15 +1,15 @@
 from vnpy.event import EventEngine
-from .object import (
+from vnpy.trader.object import (
     TickData, OrderData, TradeData, PositionData, AccountData,
     ContractData, LogData, OrderRequest, CancelRequest,
     SubscribeRequest, HistoryRequest, BarData
 )
-from .base import BaseGateway
+from datetime import datetime
+from typing import List
+from vnpy.trader.gateway import BaseGateway
 from polygon import RESTClient
-import requests
 from vnpy.api.rest import RestClient
 from vnpy.api.websocket import WebsocketClient
-
 
 class PolygonGateway(BaseGateway):
     """
