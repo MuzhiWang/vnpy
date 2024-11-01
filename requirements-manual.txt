@@ -32,3 +32,4 @@ urllib3==1.26.6
 lxml
 tushare
 akshare
+QScintilla

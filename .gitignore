@@ -39,6 +39,8 @@ _templates
 # Docker
 kafka/zookeeper/
 
+# env
+env
 
 # Private
 vnpy/app/cta_strategy/strategies/sma_grid_mix_strategy.py

@@ -29,6 +29,9 @@
     - [P0] Stock selection
         - BE
         - UI
+    - [P0] Git push
+    - [P0] Input settings from FE as map, and used in BE
+    - [P0] Integrate with Robinhood?
 
 
 
@@ -44,11 +47,17 @@
     - python -m pip install -U pip setuptools
     - pip install .\files\TA_Lib-0.4.22-cp37-cp37m-win_amd64.whl
     - pip install .\files\quickfix-1.15.1-cp37-cp37m-win_amd64.whl
+    - pip install .\files\TA_Lib-0.4.32-cp310-cp310-win_amd64.whl
 
 # Local test vnpy application
     - python -m server.muz True
 
+# Local virtual env
+    - python3 -m venv env
+    - source env/bin/activate  # On macOS/Linux
+    - env\Scripts\activate     # On Windows
+
 # Docker test
     - docker build -t muz_test1 -f Dockerfile-test .
     - docker-compose -f docker-compose-kafka-local.yml up --build --force-recreate
-    - 
+    -

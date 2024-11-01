@@ -14,7 +14,7 @@ from .base import (
     EVENT_ALGO_SETTING, EVENT_ALGO_VARIABLES,
     APP_NAME
 )
-from .genus import GenusClient
+# from .genus import GenusClient
 
 
 class AlgoEngine(BaseEngine):
@@ -35,7 +35,7 @@ class AlgoEngine(BaseEngine):
         self.load_algo_template()
         self.register_event()
 
-        self.genus_client: GenusClient = None
+        # self.genus_client: GenusClient = None
 
     def init_engine(self):
         """"""
@@ -43,8 +43,9 @@ class AlgoEngine(BaseEngine):
         self.load_algo_setting()
 
         if SETTINGS["genus.parent_host"]:
-            self.genus_client = GenusClient(self.main_engine, self.event_engine)
-            self.genus_client.start()
+            # self.genus_client = GenusClient(self.main_engine, self.event_engine)
+            # self.genus_client.start()
+            pass
 
     def close(self):
         """"""
@@ -71,21 +72,21 @@ class AlgoEngine(BaseEngine):
         self.add_algo_template(DmaAlgo)
         self.add_algo_template(ArbitrageAlgo)
 
-        from .genus import (
-            GenusVWAP,
-            GenusTWAP,
-            GenusPercent,
-            GenusPxInline,
-            GenusSniper,
-            GenusDMA
-        )
-
-        self.add_algo_template(GenusVWAP)
-        self.add_algo_template(GenusTWAP)
-        self.add_algo_template(GenusPercent)
-        self.add_algo_template(GenusPxInline)
-        self.add_algo_template(GenusSniper)
-        self.add_algo_template(GenusDMA)
+        # from .genus import (
+        #     GenusVWAP,
+        #     GenusTWAP,
+        #     GenusPercent,
+        #     GenusPxInline,
+        #     GenusSniper,
+        #     GenusDMA
+        # )
+        #
+        # self.add_algo_template(GenusVWAP)
+        # self.add_algo_template(GenusTWAP)
+        # self.add_algo_template(GenusPercent)
+        # self.add_algo_template(GenusPxInline)
+        # self.add_algo_template(GenusSniper)
+        # self.add_algo_template(GenusDMA)
 
     def add_algo_template(self, template: AlgoTemplate):
         """"""
