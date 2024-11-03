@@ -1,4 +1,5 @@
 from vnpy.event import EventEngine
+from vnpy.trader.constant import Exchange
 from vnpy.trader.object import (
     TickData, OrderData, TradeData, PositionData, AccountData,
     ContractData, LogData, OrderRequest, CancelRequest,
@@ -10,37 +11,60 @@ from vnpy.trader.gateway import BaseGateway
 from polygon import RESTClient
 from vnpy.api.rest import RestClient
 from vnpy.api.websocket import WebsocketClient
+from vnpy.trader.utility import load_json
+
 
 class PolygonGateway(BaseGateway):
+    GatewayName = "POLYGON"
+    setting_filename = "polygon_settings.json"
+    api_key_id = "api_key"
+
     """
     Gateway for fetching US stock data using Polygon.io API.
     """
     default_setting = {
-        "api_key": "Your API Key",
+        api_key_id: "Your API Key",
     }
 
     exchanges = ["NYSE", "NASDAQ"]
 
-    def __init__(self, event_engine: EventEngine, gateway_name: str):
-        super().__init__(event_engine, gateway_name)
-        self.api_key = ""
+    def __init__(self, event_engine: EventEngine):
+        super().__init__(event_engine, PolygonGateway.GatewayName)
+
         self.rest_api = PolygonRestApi(self)
         self.ws_api = PolygonWebsocketApi(self)
+        self._local_settings = load_json(PolygonGateway.setting_filename)
+        self._api_key = self._local_settings[PolygonGateway.api_key_id]
+
+    def get_local_settings(self) -> dict:
+        return self._local_settings
 
     def connect(self, setting: dict) -> None:
         """
         Connect to the Polygon.io API.
         """
-        self.api_key = setting.get("api_key")
+        self._api_key = setting.get(PolygonGateway.api_key_id)
 
-        if not self.api_key:
-            self.write_log("API key is missing.")
+        if not self._api_key:
+            self._api_key = self.get_local_settings()[PolygonGateway.api_key_id]
+            self.write_log("no api key from setting, load from local cache")
+
+        if not self._api_key:
+            self.write_log("no api key found.")
             return
 
-        self.rest_api.connect(self.api_key)
+        self.rest_api.connect(self._api_key)
         self.write_log("Connected to Polygon Gateway.")
-        self.query_account()
-        self.query_position()
+        # self.query_account()
+        # self.query_position()
+        req = HistoryRequest(
+            symbol="AAPL",
+            exchange=Exchange.NASDAQ,
+            start=datetime(2023, 1, 1),
+            end=datetime(2023, 1, 31)
+        )
+        res = self.query_history(req)
+        self.write_log(res)
 
     def close(self) -> None:
         """

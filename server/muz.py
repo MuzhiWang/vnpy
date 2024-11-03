@@ -7,6 +7,7 @@ import sys
 from datetime import datetime, timedelta
 
 from vnpy.event import EventEngine
+from vnpy.gateway.polygon import PolygonGateway
 from vnpy.trader.engine import MainEngine
 from vnpy.trader.ui import MainWindow, create_qapp
 # from vnpy.gateway.ctp import CtpGateway
@@ -80,6 +81,7 @@ def main():
     main_engine.add_gateway(BinanceGateway)
     main_engine.add_gateway(CoinbaseGateway)
     main_engine.add_gateway(TushareGateway)
+    main_engine.add_gateway(PolygonGateway)
 
     main_engine.add_app(CtaStrategyApp)
     main_engine.add_app(CtaBacktesterApp)
@@ -107,6 +109,7 @@ def main():
     # print("\n================ akshare =================\n")
     # print(stock_zh_a_hist_df)
 
+    test_1(main_engine, event_engine)
 
 
     args = sys.argv
@@ -123,6 +126,10 @@ def main():
     
     print("tornado service started")
     tornado.ioloop.IOLoop.instance().start()
+
+def test_1(main_engine: MainEngine, event_engine: EventEngine):
+    main_engine.get_gateway(PolygonGateway.GatewayName).connect({})
+
 
 if __name__ == "__main__":
     main()

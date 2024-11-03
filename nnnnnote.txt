@@ -31,7 +31,8 @@
         - UI
     - [P0] Git push
     - [P0] Input settings from FE as map, and used in BE
-    - [P0] Integrate with Robinhood?
+    - [P0] Integrate with Polycon
+    - [P0] No UI, focus on BE. Leverage log
 
 
 
