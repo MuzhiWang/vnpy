@@ -61,4 +61,11 @@
 # Docker test
     - docker build -t muz_test1 -f Dockerfile-test .
     - docker-compose -f docker-compose-kafka-local.yml up --build --force-recreate
-    -
+
+# Polygon settings
+    - Setting file: ~/.vntrader/polygon_settings.json
+    - {"api_key": "<api_key>"}
+
+# System cmd
+    - Get-Process -Name python | Stop-Process -Force
+

@@ -4,6 +4,7 @@ import tornado.web
 import threading
 import time
 import sys
+import argparse
 from datetime import datetime, timedelta
 
 from vnpy.event import EventEngine
@@ -27,7 +28,6 @@ from server.handler.marketplace import DownloadDataHandler, StockDataHandler
 from server.handler.account import AccountConnectHandler
 from server.handler.backtester import GetBacktestResultHandler, RunBacktestHandler, StopBacktestHandler
 from server.handler.log_event import LogEventWebSocketHandler
-
 
 def start_vnpy_app(main_engine: MainEngine, event_engine: EventEngine):
     """Start VN Trader"""
@@ -73,59 +73,78 @@ def start_tornado_app(main_engine: MainEngine, event_engine: EventEngine):
         ]
     )
 
+
 def main():
-    event_engine = EventEngine()
-    main_engine = MainEngine(event_engine)
+    parser = argparse.ArgumentParser(description="muz server")
+    parser.add_argument(
+        "--option",
+        choices=["server", "with-app", "test"],
+        required=True,
+        help="server: start the server, with-app: start the server with vnpy app, test: test the server"
+    )
 
-    # main_engine.add_gateway(CtpGateway)
-    main_engine.add_gateway(BinanceGateway)
-    main_engine.add_gateway(CoinbaseGateway)
-    main_engine.add_gateway(TushareGateway)
-    main_engine.add_gateway(PolygonGateway)
+    try:
+        event_engine = EventEngine()
+        main_engine = MainEngine(event_engine)
 
-    main_engine.add_app(CtaStrategyApp)
-    main_engine.add_app(CtaBacktesterApp)
-    main_engine.add_app(AlgoTradingApp)
-    main_engine.add_app(DataRecorderApp)
-    main_engine.add_app(PortfolioManagerApp)
-    main_engine.add_app(PortfolioStrategyApp)
-    main_engine.add_app(ChartWizardApp)
+        # main_engine.add_gateway(CtpGateway)
+        main_engine.add_gateway(BinanceGateway)
+        main_engine.add_gateway(CoinbaseGateway)
+        main_engine.add_gateway(TushareGateway)
+        main_engine.add_gateway(PolygonGateway)
 
-    tushare_gw = main_engine.get_gateway('TUSHARE')
-    from vnpy.trader.object import HistoryRequest
-    res = tushare_gw.query_history(HistoryRequest(
-        start=datetime.fromisoformat('2022-10-10'),
-        end=datetime.fromisoformat('2023-05-10'),
-        symbol='xxx',
-        exchange=Exchange.SSE,
-    ))
+        main_engine.add_app(CtaStrategyApp)
+        main_engine.add_app(CtaBacktesterApp)
+        main_engine.add_app(AlgoTradingApp)
+        main_engine.add_app(DataRecorderApp)
+        main_engine.add_app(PortfolioManagerApp)
+        main_engine.add_app(PortfolioStrategyApp)
+        main_engine.add_app(ChartWizardApp)
 
-    print("\n=================================\n")
-    print(res)
+        # tushare_gw = main_engine.get_gateway('TUSHARE')
+        # from vnpy.trader.object import HistoryRequest
+        # res = tushare_gw.query_history(HistoryRequest(
+        #     start=datetime.fromisoformat('2022-10-10'),
+        #     end=datetime.fromisoformat('2023-05-10'),
+        #     symbol='xxx',
+        #     exchange=Exchange.SSE,
+        # ))
 
-    # import akshare as ak
-    # stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol="000001", period="daily", start_date="20170301", end_date='20210907',
-    #                                         adjust="")
-    # print("\n================ akshare =================\n")
-    # print(stock_zh_a_hist_df)
+        # print("\n=================================\n")
+        # print(res)
 
-    test_1(main_engine, event_engine)
+        # import akshare as ak
+        # stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol="000001", period="daily", start_date="20170301", end_date='20210907',
+        #                                         adjust="")
+        # print("\n================ akshare =================\n")
+        # print(stock_zh_a_hist_df)
 
+        args = parser.parse_args()
+        print(args)
+        if args.option == "server":
+            pass
+        elif args.option == "with-app":
+            vnpy_thread = threading.Thread(target=start_vnpy_app, args=[main_engine, event_engine], daemon=True)
+            vnpy_thread.start()
+        elif args.option == "test":
+            test_1(main_engine, event_engine)
+            return
+        else:
+            print("invalid option")
+            sys.exit(1)
 
-    args = sys.argv
-    print(args)
-    if len(args) > 1 and args[1].lower() == "true":
-        vnpy_thread = threading.Thread(target=start_vnpy_app, args=[main_engine, event_engine], daemon=True)
-        vnpy_thread.start()
+        if args.option == "server":
+            tornado_app = start_tornado_app(main_engine, event_engine)
+            tornado_app.listen(9082)
+            tornado.ioloop.IOLoop.instance().add_timeout(
+                timedelta(seconds=1),
+                LogEventWebSocketHandler.write_to_clients)
 
-    tornado_app = start_tornado_app(main_engine, event_engine)
-    tornado_app.listen(9082)
-    tornado.ioloop.IOLoop.instance().add_timeout(
-        timedelta(seconds=1),
-        LogEventWebSocketHandler.write_to_clients)
-    
-    print("tornado service started")
-    tornado.ioloop.IOLoop.instance().start()
+            print("tornado service started")
+            tornado.ioloop.IOLoop.instance().start()
+    except KeyboardInterrupt:
+        sys.exit(0)
+
 
 def test_1(main_engine: MainEngine, event_engine: EventEngine):
     main_engine.get_gateway(PolygonGateway.GatewayName).connect({})
