@@ -4,6 +4,7 @@ import tornado.web
 import threading
 import time
 import sys
+import os
 import argparse
 from datetime import datetime, timedelta
 
@@ -82,6 +83,8 @@ def main():
         required=True,
         help="server: start the server, with-app: start the server with vnpy app, test: test the server"
     )
+    args = parser.parse_args()
+    print(args)
 
     try:
         event_engine = EventEngine()
@@ -119,8 +122,6 @@ def main():
         # print("\n================ akshare =================\n")
         # print(stock_zh_a_hist_df)
 
-        args = parser.parse_args()
-        print(args)
         if args.option == "server":
             pass
         elif args.option == "with-app":
@@ -128,10 +129,17 @@ def main():
             vnpy_thread.start()
         elif args.option == "test":
             test_1(main_engine, event_engine)
-            return
+
+            print("fjdklsajfkld+++++++++ bfore exit")
+
+            # sys.exit(0)
+            # os._exit(0)
+
+            print("fjdklsajfkld+++++++++ after exit")
         else:
             print("invalid option")
-            sys.exit(1)
+            # sys.exit(1)
+            os._exit(0)
 
         if args.option == "server":
             tornado_app = start_tornado_app(main_engine, event_engine)
@@ -143,11 +151,14 @@ def main():
             print("tornado service started")
             tornado.ioloop.IOLoop.instance().start()
     except KeyboardInterrupt:
-        sys.exit(0)
+        # sys.exit(0)
+        os._exit(0)
 
 
 def test_1(main_engine: MainEngine, event_engine: EventEngine):
-    main_engine.get_gateway(PolygonGateway.GatewayName).connect({})
+    gw = main_engine.get_gateway(PolygonGateway.GatewayName)
+    gw.connect({})
+    gw.close()
 
 
 if __name__ == "__main__":

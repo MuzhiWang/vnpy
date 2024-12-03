@@ -1,4 +1,6 @@
 import sys
+import os
+import time
 import traceback
 from datetime import datetime
 from enum import Enum
@@ -126,7 +128,15 @@ class RestClient(object):
 
         self._active = True
         self._pool = Pool(n)
-        self._pool.apply_async(self._run)
+
+        try:
+            self._pool.apply_async(self._run)
+
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("================== RestClient start KeyboardInterrupt ==================")
+            os._exit(0)
 
     def stop(self) -> None:
         """
@@ -190,8 +200,13 @@ class RestClient(object):
                         self._process_request(request, session)
                     finally:
                         self._queue.task_done()
+
+                    # time.sleep(0.1)
                 except Empty:
                     pass
+        except KeyboardInterrupt:
+            print("================== RestClient _run KeyboardInterrupt ==================")
+            os._exit(0)
         except Exception:
             et, ev, tb = sys.exc_info()
             self.on_error(et, ev, tb, None)

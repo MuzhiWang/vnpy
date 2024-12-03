@@ -128,7 +128,7 @@ class PolygonRestApi(RestClient):
         """
         self.api_key = api_key
         self.client = RESTClient(self.api_key)
-        self.start(3)
+        # self.start(3)
         self.gateway.write_log("REST API connected.")
 
     def query_account(self) -> None:
