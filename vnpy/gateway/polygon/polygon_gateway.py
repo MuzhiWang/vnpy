@@ -12,6 +12,7 @@ from polygon import RESTClient
 from vnpy.api.rest import RestClient
 from vnpy.api.websocket import WebsocketClient
 from vnpy.trader.utility import load_json
+import os
 
 
 class PolygonGateway(BaseGateway):
@@ -57,14 +58,6 @@ class PolygonGateway(BaseGateway):
         self.write_log("Connected to Polygon Gateway.")
         # self.query_account()
         # self.query_position()
-        req = HistoryRequest(
-            symbol="AAPL",
-            exchange=Exchange.NASDAQ,
-            start=datetime(2023, 1, 1),
-            end=datetime(2023, 1, 31)
-        )
-        res = self.query_history(req)
-        self.write_log(res)
 
     def close(self) -> None:
         """
@@ -128,7 +121,10 @@ class PolygonRestApi(RestClient):
         """
         self.api_key = api_key
         self.client = RESTClient(self.api_key)
-        # self.start(3)
+        # try:
+        #     self.start(1) # doesn't need, no async operations
+        # except KeyboardInterrupt:
+        #     os._exit(0)
         self.gateway.write_log("REST API connected.")
 
     def query_account(self) -> None:

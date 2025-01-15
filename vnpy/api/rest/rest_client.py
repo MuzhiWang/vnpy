@@ -134,6 +134,7 @@ class RestClient(object):
 
             while True:
                 time.sleep(1)
+                print("RestClient is running...")
         except KeyboardInterrupt:
             print("================== RestClient start KeyboardInterrupt ==================")
             os._exit(0)

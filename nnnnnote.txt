@@ -51,7 +51,8 @@
     - pip install .\files\TA_Lib-0.4.32-cp310-cp310-win_amd64.whl
 
 # Local test vnpy application
-    - python -m server.muz True
+    - python -m server.muz server --only
+    - python -m server.muz test --unit polygon
 
 # Local virtual env
     - python3 -m venv env
