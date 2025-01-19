@@ -13,6 +13,7 @@ def initialize(context):
         OrderCost(open_tax=0.001, close_tax=0.001, open_commission=0.0002, close_commission=0.0002, min_commission=5),
         type='fund'
     )
+    g.print_debug = True
 
     # ETF池及其初始权重
     g.etf_list = [
@@ -47,6 +48,8 @@ def trade(context):
 
     # 目标持仓 {eft: target_values}
     target_values = {etf: total_value * weight for etf, weight in zip(g.etf_list, g.weights)}
+    print_debug(f"当前持仓 {current_positions}")
+    print_debug(f"目标持仓 {target_values}")
 
     # 检查每日比例偏差
     for etf, target_value in target_values.items():
@@ -56,18 +59,22 @@ def trade(context):
             current_value = 0
 
         # 计算当前持仓与目标持仓的偏差 %
-        deviation = (current_value - target_value) / target_value
+        deviation = (current_value - target_value) / float(target_value)
 
         # 如果偏差超出阈值，调整持仓 卖出
         if deviation > g.rebalance_threshold:
-            sell_value = current_value - target_value * (1 + g.rebalance_threshold)
-            order_target_value(etf, current_value - sell_value)
-            print(f"卖出 {etf} 超出部分 {sell_value}")
+            # sell_value = current_value - target_value * (1 + g.rebalance_threshold)
+            sell_value = current_value - target_value
+            order_target_value(etf, target_value)
+            print_debug(f"卖出 {etf} 超出部分 {sell_value}")
         # 如果偏差不足阈值，调整持仓 买入
         elif deviation < -g.rebalance_threshold:
-            buy_value = target_value * (1 - g.rebalance_threshold) - current_value
-            order_target_value(etf, current_value + buy_value)
-            print(f"买入 {etf} 不足部分 {buy_value}")
+            # buy_value = target_value * (1 - g.rebalance_threshold) - current_value
+            buy_value = target_value - current_value
+            order_target_value(etf, target_value)
+            print_debug(f"买入 {etf} 不足部分 {buy_value}")
+
+    print_debug(f"每日交易后 当前持仓 {context.portfolio.positions}")
 
     # 每3个月检查一次比例
     if g.rebalance_count >= g.rebalance_interval:
@@ -90,3 +97,7 @@ def quarterly_rebalance(context, target_values):
                 print(f"季度调整：卖出 {etf} 多余部分 {current_value - target_value}")
             else:
                 print(f"季度调整：买入 {etf} 不足部分 {target_value - current_value}")
+
+def print_debug(str):
+    if g.print_debug:
+        print(str)
