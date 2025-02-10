@@ -154,7 +154,7 @@ class Strategy:
 
 
 # ----------------------------------------------------------------
-# 5) SingleETFMomentumStrategy (example)
+# 5) SingleETFMomentumStrategy
 # ----------------------------------------------------------------
 class SingleETFMomentumStrategy(Strategy):
     def __init__(self, context, subportfolio_index, name):
