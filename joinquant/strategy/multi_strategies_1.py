@@ -66,6 +66,9 @@ def initialize(context):
     run_weekly(do_high_div_peg_my_trader, weekday=1, time="9:31")
     run_daily(do_high_div_peg_check_limit_up, time="14:00")
 
+    # Schedule the metrics output to run daily after market close:
+    run_daily(output_daily_metrics, time="after_close")
+
 
 # ----------------------------------------------------------------
 # 2) Bridge Functions (top-level) for scheduling
@@ -159,10 +162,27 @@ class SingleETFMomentumStrategy(Strategy):
         self.etf_num = 1
         self.momentum_type = 1
         self.etf_list = [
-            '518880.XSHG',  # 黄金ETF
-            '513100.XSHG',  # 纳指100
-            '159915.XSHE',  # 创业板100
-            '510300.XSHG',  # 沪深300
+            '518880.XSHG', #黄金ETF（最佳避险大宗商品）
+            '513100.XSHG', #纳指100（美股最优资产）
+            '159915.XSHE', #创业板100（成长股）
+            '512890.XSHG', #红利低波 （高股息）
+            #'510300.XSHG', #沪深300（价值股，中大市值蓝筹股）
+            #'512100.XSHG', #中证1000（小盘股）
+            #'510050.XSHG', #上证50
+            '510180.XSHG', #上证180
+            #'161725.XSHE', #白酒
+            #'159992.XSHE', #创新药
+            #'560080.XSHG', #中药
+            #'515700.XSHG', #新能源车
+            #'515250.XSHG', #智能汽车
+            #'515790.XSHG', #光伏
+            #'515880.XSHG', #通信
+            #'159819.XSHE', #人工智能
+            #'512720.XSHG', #计算机（云计算，大数据）
+            '159740.XSHE', #恒生科技
+            #'159985.XSHE', #豆粕
+            #'162411.XSHE', #华宝油气
+            #'159981.XSHE', #能源化工ETF
             '159628.XSHE',  # 国证2000
         ]
 
@@ -173,7 +193,6 @@ class SingleETFMomentumStrategy(Strategy):
         else:
             target_list = self.get_rank1(self.etf_list)[: self.etf_num]
 
-        hold_ratio = self.check_moving_average_condition(target_list)
         subp = context.subportfolios[self.subportfolio_index]
         hold_list = list(subp.positions.keys())
 
@@ -188,7 +207,7 @@ class SingleETFMomentumStrategy(Strategy):
         # Buy
         hold_list = list(subp.positions.keys())
         if target_list:
-            available_cash = subp.available_cash * hold_ratio
+            available_cash = subp.available_cash
             to_fill = self.etf_num - len(hold_list)
             if to_fill > 0:
                 each_val = available_cash / to_fill
@@ -772,3 +791,25 @@ def inout_cash(amount, pindex=0):
         transfer_cash(from_pindex=0, to_pindex=pindex, cash=amount)
     elif amount < 0:
         transfer_cash(from_pindex=pindex, to_pindex=0, cash=abs(amount))
+
+def output_daily_metrics(context):
+    # Loop over each strategy stored in g.strategys.
+    for key, strat in g.strategys.items():
+        # Each strategy controls a subportfolio indexed by strat.subportfolio_index.
+        subp = context.subportfolios[strat.subportfolio_index]
+        total_value = subp.total_value
+        available_cash = subp.available_cash
+        # Calculate the position ratio (the proportion of funds that are invested)
+        pos_ratio = 0
+        if total_value > 0:
+            pos_ratio = (total_value - available_cash) / total_value * 100
+
+        # You can output additional metrics if you wish.
+        # For example, you might output total_value and pos_ratio with a unique name for each strategy.
+        record(**{
+            f"{strat.name}_Value": total_value,
+            f"{strat.name}_Pos%": pos_ratio
+        })
+        log.info(f"Strategy {strat.name}: Total Value = {total_value:.2f}, Position Ratio = {pos_ratio:.2f}%")
+
+
