@@ -8,7 +8,7 @@ from scipy.stats import linregress
 import datetime
 
 # ----------------------------------------------------------------
-# 1) Initialize
+# 1) Initialize. test with JX
 # ----------------------------------------------------------------
 def initialize(context):
     log.info("==> Multi-Strategy Initialize")
