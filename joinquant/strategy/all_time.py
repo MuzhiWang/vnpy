@@ -27,11 +27,12 @@ def initialize(context):
         "510300.XSHG",  # 沪深300（价值股，中大市值蓝筹股）
         "510500.XSHG",  # 中证500（中盘股）
         "512100.XSHG",  # 中证1000（小盘股）
+        "588080.XSHG",  # 科创板
         "159980.XSHE",  # 有色ETF
         "162411.XSHE",  # 华宝油
         "159985.XSHE",  # 豆粕ETF
     ]
-    g.weights = [0.35, 0.05, 0.1, 0.15, 0.05, 0.04, 0.04, 0.04, 0.04, 0.04, 0.025, 0.05, 0.025]  # 初始比例
+    g.weights = [0.35, 0.05, 0.1, 0.15, 0.05, 0.04, 0.04, 0.03, 0.03, 0.03, 0.03, 0.025, 0.05, 0.025]  # 初始比例
 
     g.rebalance_threshold = 0.25  # 调仓比例阈值
     g.rebalance_interval = 60  # 每3个月调整一次比例（按交易日计）
@@ -101,3 +102,5 @@ def quarterly_rebalance(context, target_values):
 def print_debug(str):
     if g.print_debug:
         print(str)
+
+
