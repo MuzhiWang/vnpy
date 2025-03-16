@@ -41,6 +41,9 @@ def initialize(context):
     g.strategys["all_time"] = AllTimeStrategy(context, subportfolio_index=3, name="全天候策略")
     g.strategys["high_div_peg"] = HighDividendPEGStrategy(context, subportfolio_index=4, name="高股息+PEG策略")
 
+    # Initialize a global history dictionary to record daily total values for correlation analysis.
+    g.strategy_history = {key: [] for key, strat in g.strategys.items()}
+
     # Monthly subportfolio rebalance
     run_monthly(do_balance_subportfolios, 1, time="9:00")
 
@@ -51,7 +54,6 @@ def initialize(context):
     # (B) MidSmallCap
     run_daily(do_mid_small_cap_change_cash, "9:30")
     run_daily(do_mid_small_cap_check_stocks, "9:31")
-    # The strategy's random trade time is in g.strategys["mid_small_cap"].trade_time
     run_daily(do_mid_small_cap_main_stock_pick, g.strategys["mid_small_cap"].trade_time)
     run_daily(do_mid_small_cap_trade, g.strategys["mid_small_cap"].trade_time)
     run_daily(do_mid_small_cap_no_zt_sell, "14:49")
@@ -66,7 +68,7 @@ def initialize(context):
     run_weekly(do_high_div_peg_my_trader, weekday=1, time="9:31")
     run_daily(do_high_div_peg_check_limit_up, time="14:00")
 
-    # Schedule the metrics output to run daily after market close:
+    # Schedule the daily metrics output (which now also computes correlation) to run after market close:
     run_daily(output_daily_metrics, time="after_close")
 
 
@@ -792,24 +794,43 @@ def inout_cash(amount, pindex=0):
     elif amount < 0:
         transfer_cash(from_pindex=pindex, to_pindex=0, cash=abs(amount))
 
+
+# ----------------------------------------------------------------
+# 10) Output Daily Metrics and Compute Correlation
+# ----------------------------------------------------------------
 def output_daily_metrics(context):
     # Loop over each strategy stored in g.strategys.
     for key, strat in g.strategys.items():
-        # Each strategy controls a subportfolio indexed by strat.subportfolio_index.
         subp = context.subportfolios[strat.subportfolio_index]
         total_value = subp.total_value
         available_cash = subp.available_cash
-        # Calculate the position ratio (the proportion of funds that are invested)
-        pos_ratio = 0
-        if total_value > 0:
-            pos_ratio = (total_value - available_cash) / total_value * 100
+        pos_ratio = (total_value - available_cash) / total_value * 100 if total_value > 0 else 0
 
-        # You can output additional metrics if you wish.
-        # For example, you might output total_value and pos_ratio with a unique name for each strategy.
+        # Record individual metrics
         record(**{
             f"{strat.name}_Value": total_value,
             f"{strat.name}_Pos%": pos_ratio
         })
         log.info(f"Strategy {strat.name}: Total Value = {total_value:.2f}, Position Ratio = {pos_ratio:.2f}%")
 
+        # Append today's total value to the history for correlation analysis.
+        g.strategy_history[key].append((context.current_dt, total_value))
 
+    # Build a DataFrame from the recorded history.
+    history_dict = {}
+    for strat_name, records in g.strategy_history.items():
+        # Convert list of (date, value) to a Series.
+        dates = [r[0] for r in records]
+        values = [r[1] for r in records]
+        history_dict[strat_name] = pd.Series(values, index=pd.to_datetime(dates))
+    df = pd.DataFrame(history_dict).sort_index()
+
+    # If there are at least two days of data, compute daily returns and the correlation matrix.
+    # Compute and log the correlation matrix
+    if df.shape[0] >= 2:
+        returns = df.pct_change().dropna()
+        corr_matrix = returns.corr()
+        log.info("Correlation Matrix of Daily Returns:")
+        log.info("\n" + corr_matrix.to_string())
+        # Remove or comment out the record() call for the matrix:
+        # record(Correlation_Matrix=str(corr_matrix))
