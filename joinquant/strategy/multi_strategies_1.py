@@ -799,38 +799,43 @@ def inout_cash(amount, pindex=0):
 # 10) Output Daily Metrics and Compute Correlation
 # ----------------------------------------------------------------
 def output_daily_metrics(context):
-    # Loop over each strategy stored in g.strategys.
+    # Record individual strategy metrics and append today's total value to history.
     for key, strat in g.strategys.items():
         subp = context.subportfolios[strat.subportfolio_index]
         total_value = subp.total_value
         available_cash = subp.available_cash
         pos_ratio = (total_value - available_cash) / total_value * 100 if total_value > 0 else 0
-
-        # Record individual metrics
         record(**{
             f"{strat.name}_Value": total_value,
             f"{strat.name}_Pos%": pos_ratio
         })
         log.info(f"Strategy {strat.name}: Total Value = {total_value:.2f}, Position Ratio = {pos_ratio:.2f}%")
-
-        # Append today's total value to the history for correlation analysis.
+        # Append today's value to history.
         g.strategy_history[key].append((context.current_dt, total_value))
 
-    # Build a DataFrame from the recorded history.
+    # Build a DataFrame from the full recorded history.
     history_dict = {}
     for strat_name, records in g.strategy_history.items():
-        # Convert list of (date, value) to a Series.
         dates = [r[0] for r in records]
         values = [r[1] for r in records]
         history_dict[strat_name] = pd.Series(values, index=pd.to_datetime(dates))
     df = pd.DataFrame(history_dict).sort_index()
 
-    # If there are at least two days of data, compute daily returns and the correlation matrix.
-    # Compute and log the correlation matrix
-    if df.shape[0] >= 2:
-        returns = df.pct_change().dropna()
-        corr_matrix = returns.corr()
-        log.info("Correlation Matrix of Daily Returns:")
-        log.info("\n" + corr_matrix.to_string())
-        # Remove or comment out the record() call for the matrix:
-        # record(Correlation_Matrix=str(corr_matrix))
+    # Ensure we have at least 2 days to compute returns.
+    if df.shape[0] < 2:
+        return
+
+    returns = df.pct_change().dropna()
+    corr_matrix = returns.corr()
+    log.info("Correlation Matrix of Daily Returns (full history):")
+    log.info("\n" + corr_matrix.to_string())
+
+    # Now, record each pair's correlation as a separate metric.
+    keys = list(corr_matrix.columns)
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            pair_key = f"Corr_{keys[i]}_{keys[j]}"
+            corr_value = corr_matrix.loc[keys[i], keys[j]]
+            if not np.isnan(corr_value):
+                record(**{pair_key: corr_value})
+                log.info(f"Recorded {pair_key} = {corr_value:.4f}")
