@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Item Calculator</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            width: 100%;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+        .item-row, .headers {
+            display: flex;
+            width: 100%;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        .item-row input, .headers div {
+            padding: 8px;
+        }
+        .item-row input {
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            width: 100%;
+        }
+        .col {
+            padding: 0 5px;
+        }
+        .name-col {
+            flex: 3;
+            min-width: 150px;
+        }
+        .price-col, .quantity-col, .total-col {
+            flex: 1;
+            min-width: 80px;
+        }
+        .action-col {
+            width: 40px;
+            min-width: 40px;
+        }
+        .item-total {
+            font-weight: bold;
+            padding: 8px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            text-align: right;
+            width: 100%;
+        }
+        .remove-btn {
+            background-color: #ff4d4d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px;
+            cursor: pointer;
+            width: 100%;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 10px 15px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        .add-btn {
+            background-color: #4CAF50;
+            color: white;
+            flex-grow: 0;
+        }
+        .calculate-btn {
+            background-color: #2196F3;
+            color: white;
+            flex: 1;
+        }
+        .headers {
+            font-weight: bold;
+            border-bottom: 2px solid #ddd;
+            padding-bottom: 10px;
+        }
+        .summary {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            text-align: right;
+            font-size: 1.2em;
+        }
+        .grand-total {
+            font-weight: bold;
+            color: #2196F3;
+        }
+
+        /* Price stepper style */
+        .price-stepper {
+            display: flex;
+            width: 100%;
+        }
+        .price-stepper input {
+            text-align: center;
+            flex: 1;
+            border-radius: 0;
+            -moz-appearance: textfield; /* Firefox */
+        }
+        .price-stepper input::-webkit-outer-spin-button,
+        .price-stepper input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .stepper-btn {
+            width: 30px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #e0e0e0;
+            border: 1px solid #ddd;
+            cursor: pointer;
+            font-weight: bold;
+            user-select: none;
+        }
+        .stepper-btn:hover {
+            background-color: #d0d0d0;
+        }
+        .decrement {
+            border-radius: 4px 0 0 4px;
+        }
+        .increment {
+            border-radius: 0 4px 4px 0;
+        }
+
+        /* Media queries for better responsiveness */
+        @media (max-width: 600px) {
+            .container {
+                padding: 10px;
+            }
+            .item-row, .headers {
+                flex-wrap: wrap;
+                gap: 5px;
+                margin-bottom: 15px;
+                border-bottom: 1px solid #eee;
+                padding-bottom: 10px;
+            }
+            .headers {
+                display: none;
+            }
+            .name-col, .price-col, .quantity-col {
+                flex: 1 1 100%;
+                min-width: 100%;
+            }
+            .total-col {
+                flex: 1 1 calc(100% - 50px);
+                min-width: calc(100% - 50px);
+            }
+            .action-col {
+                flex: 0 0 40px;
+                align-self: flex-end;
+            }
+            .item-row input::placeholder {
+                opacity: 1;
+            }
+            /* Add labels via pseudo elements */
+            .item-row .name-col::before {
+                content: "Item:";
+                display: block;
+                font-weight: bold;
+                font-size: 0.8em;
+                margin-bottom: 2px;
+            }
+            .item-row .price-col::before {
+                content: "Unit Price:";
+                display: block;
+                font-weight: bold;
+                font-size: 0.8em;
+                margin-bottom: 2px;
+            }
+            .item-row .quantity-col::before {
+                content: "Quantity:";
+                display: block;
+                font-weight: bold;
+                font-size: 0.8em;
+                margin-bottom: 2px;
+            }
+            .item-row .total-col::before {
+                content: "Total:";
+                display: block;
+                font-weight: bold;
+                font-size: 0.8em;
+                margin-bottom: 2px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>大甜甜宇宙大超市</h1>
+
+        <div class="table-container">
+            <div class="headers">
+                <div class="name-col col">物品</div>
+                <div class="price-col col">单价</div>
+                <div class="quantity-col col">数量</div>
+                <div class="total-col col">总价</div>
+                <div class="action-col col"></div>
+            </div>
+
+            <div id="items-container">
+                <!-- Item rows will be added here -->
+            </div>
+        </div>
+
+        <div class="action-buttons">
+            <button class="add-btn" onclick="addItem()">新增物品</button>
+            <button class="calculate-btn" onclick="calculateAll()">计算</button>
+        </div>
+
+        <div id="summary" class="summary">
+            总价: <span class="grand-total" id="grand-total">0 R</span>
+        </div>
+    </div>
+
+    <script>
+        let itemCounter = 0;
+
+        // Default items that will be loaded on initialization
+        const defaultItems = [
+            { name: "战士铭文", price: 5.2, quantity: 0 },
+            { name: "祝福油", price: 8, quantity: 0 },
+            { name: "完整无相石", price: 2, quantity: 0 },
+            { name: "天赋突破石", price: 6, quantity: 0 },
+            { name: "绿宝石", price: 32, quantity: 0 },
+            { name: "初级羽毛", price: 1.4, quantity: 0 },
+            { name: "其他", price: 0, quantity: 1 }
+        ];
+
+        // Initialize the calculator with default items
+        window.onload = function() {
+            // Add default items
+            defaultItems.forEach(item => {
+                addItemWithValues(item.name, item.price, item.quantity);
+            });
+
+            // Calculate the initial total
+            calculateAll();
+        };
+
+        // Function to add a blank item
+        function addItem() {
+            addItemWithValues("", 0.0, 1);
+        }
+
+        // Function to add an item with predefined values
+        function addItemWithValues(name, price, quantity) {
+            const container = document.getElementById('items-container');
+            const itemId = itemCounter++;
+
+            const row = document.createElement('div');
+            row.className = 'item-row';
+            row.id = `item-${itemId}`;
+
+            row.innerHTML = `
+                <div class="name-col col">
+                    <input type="text" id="name-${itemId}" placeholder="Item description" value="${name}">
+                </div>
+                <div class="price-col col">
+                    <div class="price-stepper">
+                        <div class="stepper-btn decrement" onclick="adjustPrice(${itemId}, -0.1)">-</div>
+                        <input type="number" id="price-${itemId}" placeholder="Price" step="0.1" min="0" value="${price.toFixed(1)}" onchange="updateItemTotal(${itemId})">
+                        <div class="stepper-btn increment" onclick="adjustPrice(${itemId}, 0.1)">+</div>
+                    </div>
+                </div>
+                <div class="quantity-col col">
+                    <input type="number" id="quantity-${itemId}" placeholder="Qty" min="0" value="${quantity}" onchange="updateItemTotal(${itemId})">
+                </div>
+                <div class="total-col col">
+                    <div class="item-total" id="total-${itemId}">0</div>
+                </div>
+                <div class="action-col col">
+                    <button class="remove-btn" onclick="removeItem(${itemId})">×</button>
+                </div>
+            `;
+
+            container.appendChild(row);
+            updateItemTotal(itemId);
+        }
+
+        function removeItem(id) {
+            const item = document.getElementById(`item-${id}`);
+            if (item) {
+                item.remove();
+                calculateAll();
+            }
+        }
+
+        function adjustPrice(id, amount) {
+            const priceInput = document.getElementById(`price-${id}`);
+            let currentValue = parseFloat(priceInput.value) || 0;
+
+            // Add the increment/decrement amount (0.1 or -0.1)
+            currentValue = Math.max(0, (currentValue + amount).toFixed(1));
+
+            // Update the input value and recalculate
+            priceInput.value = currentValue;
+            updateItemTotal(id);
+        }
+
+        function updateItemTotal(id) {
+            const price = parseFloat(document.getElementById(`price-${id}`).value) || 0;
+            const quantity = parseInt(document.getElementById(`quantity-${id}`).value) || 0;
+            const total = price * quantity;
+
+            document.getElementById(`total-${id}`).textContent = `${total.toFixed(2)}`;
+            calculateAll();
+        }
+
+        function calculateAll() {
+            let grandTotal = 0;
+            const rows = document.querySelectorAll('.item-row');
+
+            rows.forEach(row => {
+                const id = row.id.split('-')[1];
+                const price = parseFloat(document.getElementById(`price-${id}`).value) || 0;
+                const quantity = parseInt(document.getElementById(`quantity-${id}`).value) || 0;
+                grandTotal += price * quantity;
+            });
+
+            document.getElementById('grand-total').textContent = `${grandTotal.toFixed(2)} R`;
+        }
+    </script>
+</body>
+</html>
