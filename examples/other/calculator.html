@@ -267,18 +267,15 @@
 
         // Initialize the calculator with default items
         window.onload = function() {
-            // Add default items
-            defaultItems.forEach(item => {
-                addItemWithValues(item.name, item.price, item.quantity);
-            });
-
-            // Calculate the initial total
-            calculateAll();
+            // Load items from storage (or defaults if no stored items)
+            loadItemsFromStorage();
         };
+
 
         // Function to add a blank item
         function addItem() {
             addItemWithValues("", 0.0, 1);
+            saveItemsToStorage();
         }
 
         // Function to add an item with predefined values
@@ -292,7 +289,7 @@
 
             row.innerHTML = `
                 <div class="name-col col">
-                    <input type="text" id="name-${itemId}" placeholder="Item description" value="${name}">
+                    <input type="text" id="name-${itemId}" placeholder="Item description" value="${name}" onchange="saveItemsToStorage()">
                 </div>
                 <div class="price-col col">
                     <div class="price-stepper">
@@ -321,6 +318,7 @@
             if (item) {
                 item.remove();
                 calculateAll();
+                saveItemsToStorage();
             }
         }
 
@@ -343,6 +341,7 @@
 
             document.getElementById(`total-${id}`).textContent = `${total.toFixed(2)}`;
             calculateAll();
+            saveItemsToStorage();
         }
 
         function calculateAll() {
@@ -358,6 +357,47 @@
 
             document.getElementById('grand-total').textContent = `${grandTotal.toFixed(2)} R`;
         }
+
+        // Function to save all items to localStorage
+        function saveItemsToStorage() {
+            const items = [];
+            const rows = document.querySelectorAll('.item-row');
+
+            rows.forEach(row => {
+                const id = row.id.split('-')[1];
+                const name = document.getElementById(`name-${id}`).value;
+                const price = parseFloat(document.getElementById(`price-${id}`).value) || 0;
+                const quantity = parseInt(document.getElementById(`quantity-${id}`).value) || 0;
+
+                items.push({ name, price, quantity });
+            });
+
+            localStorage.setItem('calculatorItems', JSON.stringify(items));
+        }
+
+        // Function to load items from localStorage
+        function loadItemsFromStorage() {
+            const savedItems = localStorage.getItem('calculatorItems');
+
+            if (savedItems) {
+                // Clear existing items first
+                document.getElementById('items-container').innerHTML = '';
+
+                // Add saved items
+                JSON.parse(savedItems).forEach(item => {
+                    addItemWithValues(item.name, item.price, item.quantity);
+                });
+            } else {
+                // If no saved items, load default items
+                defaultItems.forEach(item => {
+                    addItemWithValues(item.name, item.price, item.quantity);
+                });
+            }
+
+            // Calculate the initial total
+            calculateAll();
+        }
+
     </script>
 </body>
 </html>
