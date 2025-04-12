@@ -35,7 +35,7 @@ def initialize(context):
         'show_returns': False,              # Show daily/weekly returns
         'show_drawdowns': False,            # Show drawdown metrics
         'log_correlation_matrix': True,     # Log correlation matrix to log panel
-        'correlation_lookback': 20          # Days to look back for correlation
+        'correlation_lookback': 100          # Days to look back for correlation
     }
 
     # subportfolios
@@ -465,11 +465,13 @@ class MidSmallCapStrategy(Strategy):
         subp = context.subportfolios[self.subportfolio_index]
         log.info(f"[{self.name}] 收盘后: 子组合{self.subportfolio_index}资产: {round(subp.total_value,2)}")
 
-        if subp.total_value > 0:
-            pos_ratio = 1.0 - (subp.available_cash/subp.total_value)
-        else:
-            pos_ratio = 0
-        record(**{f"{self.name}_Pos%": pos_ratio*100})
+        # Only record if position ratios are enabled
+        if g.metrics_settings['show_position_ratios']:
+            if subp.total_value > 0:
+                pos_ratio = 1.0 - (subp.available_cash/subp.total_value)
+            else:
+                pos_ratio = 0
+            record(**{f"{self.name}_Pos%": pos_ratio*100})
 
     # Helpers
     def _do_sell(self, context, buy_lists):
