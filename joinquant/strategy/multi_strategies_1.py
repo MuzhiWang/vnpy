@@ -27,6 +27,17 @@ def initialize(context):
         type="fund"
     )
 
+    # Initialize metric control settings
+    g.metrics_settings = {
+        'show_portfolio_values': True,      # Show each strategy's total value
+        'show_position_ratios': True,       # Show each strategy's position ratio
+        'show_correlations': True,          # Show correlation between strategies
+        'show_returns': False,              # Show daily/weekly returns
+        'show_drawdowns': False,            # Show drawdown metrics
+        'log_correlation_matrix': True,     # Log correlation matrix to log panel
+        'correlation_lookback': 20          # Days to look back for correlation
+    }
+
     # subportfolios
     g.portfolio_value_proportion = [0.0, 0.25, 0.25, 0.25, 0.25]
     set_subportfolios([
@@ -796,7 +807,7 @@ def inout_cash(amount, pindex=0):
 
 
 # ----------------------------------------------------------------
-# 10) Output Daily Metrics and Compute Correlation
+# 10) Enhanced Output Daily Metrics with Switch Controllers
 # ----------------------------------------------------------------
 def output_daily_metrics(context):
     # Record individual strategy metrics and append today's total value to history.
@@ -805,12 +816,21 @@ def output_daily_metrics(context):
         total_value = subp.total_value
         available_cash = subp.available_cash
         pos_ratio = (total_value - available_cash) / total_value * 100 if total_value > 0 else 0
-        record(**{
-            f"{strat.name}_Value": total_value,
-            f"{strat.name}_Pos%": pos_ratio
-        })
+
+        # Only record metrics based on settings
+        metrics_to_record = {}
+        if g.metrics_settings['show_portfolio_values']:
+            metrics_to_record[f"{strat.name}_Value"] = total_value
+        if g.metrics_settings['show_position_ratios']:
+            metrics_to_record[f"{strat.name}_Pos%"] = pos_ratio
+
+        if metrics_to_record:
+            record(**metrics_to_record)
+
+        # Log regardless of UI metrics (helps with debugging)
         log.info(f"Strategy {strat.name}: Total Value = {total_value:.2f}, Position Ratio = {pos_ratio:.2f}%")
-        # Append today's value to history.
+
+        # Always append to history for correlation calculations
         g.strategy_history[key].append((context.current_dt, total_value))
 
     # Build a DataFrame from the full recorded history.
@@ -825,17 +845,40 @@ def output_daily_metrics(context):
     if df.shape[0] < 2:
         return
 
+    # Calculate returns
     returns = df.pct_change().dropna()
-    corr_matrix = returns.corr()
-    log.info("Correlation Matrix of Daily Returns (full history):")
-    log.info("\n" + corr_matrix.to_string())
 
-    # Now, record each pair's correlation as a separate metric.
-    keys = list(corr_matrix.columns)
-    for i in range(len(keys)):
-        for j in range(i + 1, len(keys)):
-            pair_key = f"Corr_{keys[i]}_{keys[j]}"
-            corr_value = corr_matrix.loc[keys[i], keys[j]]
-            if not np.isnan(corr_value):
-                record(**{pair_key: corr_value})
-                log.info(f"Recorded {pair_key} = {corr_value:.4f}")
+    # Record returns if enabled
+    if g.metrics_settings['show_returns']:
+        for strat_name in returns.columns:
+            if not returns[strat_name].empty:
+                record(**{f"{strat_name}_DailyReturn%": returns[strat_name].iloc[-1] * 100})
+
+    # Calculate correlation matrix using lookback period
+    lookback = min(g.metrics_settings['correlation_lookback'], len(returns))
+    recent_returns = returns.tail(lookback)
+    corr_matrix = recent_returns.corr()
+
+    # Log correlation matrix if enabled
+    if g.metrics_settings['log_correlation_matrix']:
+        log.info(f"Correlation Matrix of Daily Returns (last {lookback} days):")
+        log.info("\n" + corr_matrix.to_string())
+
+    # Record individual correlations if enabled
+    if g.metrics_settings['show_correlations']:
+        keys = list(corr_matrix.columns)
+        for i in range(len(keys)):
+            for j in range(i + 1, len(keys)):
+                pair_key = f"Corr_{keys[i]}_{keys[j]}"
+                corr_value = corr_matrix.loc[keys[i], keys[j]]
+                if not np.isnan(corr_value):
+                    record(**{pair_key: corr_value})
+
+    # Calculate and record drawdowns if enabled
+    if g.metrics_settings['show_drawdowns']:
+        for strat_name in df.columns:
+            strat_series = df[strat_name]
+            rolling_max = strat_series.cummax()
+            drawdown = (strat_series - rolling_max) / rolling_max * 100
+            current_dd = drawdown.iloc[-1] if not drawdown.empty else 0
+            record(**{f"{strat_name}_DD%": current_dd})
