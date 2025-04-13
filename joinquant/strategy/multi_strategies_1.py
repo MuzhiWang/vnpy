@@ -29,8 +29,8 @@ def initialize(context):
 
     # Initialize metric control settings
     g.metrics_settings = {
-        'show_portfolio_values': True,      # Show each strategy's total value
-        'show_position_ratios': True,       # Show each strategy's position ratio
+        'show_portfolio_values': False,      # Show each strategy's total value
+        'show_position_ratios': False,       # Show each strategy's position ratio
         'show_correlations': True,          # Show correlation between strategies
         'show_returns': False,              # Show daily/weekly returns
         'show_drawdowns': False,            # Show drawdown metrics
@@ -70,6 +70,8 @@ def initialize(context):
     run_daily(do_mid_small_cap_no_zt_sell, "14:49")
     run_daily(do_mid_small_cap_selled_security_list_count, "after_close")
     run_daily(do_mid_small_cap_after_market_close, "after_close")
+    # Schedule the split order handler
+    run_daily(handle_mid_small_cap_pending_orders, time="every_bar")
 
     # (C) AllTime => daily at 14:50
     run_daily(do_all_time_adjust, time="14:50")
@@ -85,6 +87,7 @@ def initialize(context):
 
 # ----------------------------------------------------------------
 # 2) Bridge Functions (top-level) for scheduling
+# Avoid serialization issue
 # ----------------------------------------------------------------
 
 def do_balance_subportfolios(context):
@@ -130,6 +133,10 @@ def do_high_div_peg_my_trader(context):
 def do_high_div_peg_check_limit_up(context):
     g.strategys["high_div_peg"].check_limit_up(context)
 
+def handle_mid_small_cap_pending_orders(context):
+    # We fetch the strategy instance from the global dictionary
+    g.strategys["mid_small_cap"]._handle_pending_orders(context)
+
 
 # ----------------------------------------------------------------
 # 3) balance_subportfolios
@@ -146,7 +153,6 @@ def balance_subportfolios(context):
             if to_transfer > 0:
                 transfer_cash(from_pindex=0, to_pindex=i, cash=to_transfer)
                 log.info(f"子组合0 => 子组合{i} 转移资金: {to_transfer}")
-
 
 # ----------------------------------------------------------------
 # 4) Strategy Base Class
@@ -278,7 +284,8 @@ class MidSmallCapStrategy(Strategy):
 
         self.security_max_proportion = 1
         self.check_stocks_refresh_rate = 1
-        self.max_hold_stocknum = 5
+        self.max_hold_stocknum = 5  # Default stock number limit
+        self.absolute_max_stocknum = 20  # Hard limit on stock holdings
         self.sell_rank = 7
         self.notrade_mon = [1, 4]
         self.notrade_day = 1
@@ -288,6 +295,14 @@ class MidSmallCapStrategy(Strategy):
         self.days = 0
         self.buy_trade_days = 0
         self.sell_trade_days = 0
+
+        # Order splitting settings
+        self.split_order_threshold = 50000 # threshold for splitting order
+        self.max_single_order = 50000  # single order max value
+        self.split_interval_minutes = 4  # internal time for splitting
+
+        # Order queue to track pending orders
+        self.pending_orders = []  # [(security, amount, scheduled_time), ...]
 
         self.filter_paused = True
         self.filter_delisted = True
@@ -313,6 +328,21 @@ class MidSmallCapStrategy(Strategy):
         rdm_minute = rdm_min % 60
         self.trade_time = f"{rdm_hour}:{rdm_minute}"
         log.info(f"[{self.name}] 随机交易时间: {self.trade_time}")
+
+    def _handle_pending_orders(self, context):
+        """Process any pending split orders that are due for execution"""
+        current_time = context.current_dt
+
+        # Find orders ready to execute
+        orders_to_execute = [(idx, order) for idx, order in enumerate(self.pending_orders)
+                             if order[2] <= current_time]
+
+        # Execute pending orders that are ready
+        for idx, (security, amount, _) in sorted(orders_to_execute, reverse=True):
+            log.info(f"[{self.name}] 执行拆分订单: {security}, 金额: {amount}")
+            order_value(security, amount, pindex=self.subportfolio_index)
+            # Remove from pending list
+            self.pending_orders.pop(idx)
 
     def change_cash(self, context):
         if self.first == 1:
@@ -464,9 +494,10 @@ class MidSmallCapStrategy(Strategy):
             log.info(f"[{self.name}] 成交记录: {t}")
         subp = context.subportfolios[self.subportfolio_index]
         log.info(f"[{self.name}] 收盘后: 子组合{self.subportfolio_index}资产: {round(subp.total_value,2)}")
+        log.info(f"[{self.name}] 未执行订单数: {len(self.pending_orders)}")
 
         # Only record if position ratios are enabled
-        if g.metrics_settings['show_position_ratios']:
+        if hasattr(g, 'metrics_settings') and g.metrics_settings.get('show_position_ratios', True):
             if subp.total_value > 0:
                 pos_ratio = 1.0 - (subp.available_cash/subp.total_value)
             else:
@@ -487,17 +518,78 @@ class MidSmallCapStrategy(Strategy):
 
     def _do_buy(self, context, buy_lists):
         subp = context.subportfolios[self.subportfolio_index]
+        current_positions = list(subp.positions.keys())
         buy_lists = self._holded_filter(context, buy_lists)
-        hold_count = len(subp.positions)
-        slot = self.max_hold_stocknum - hold_count
-        if slot <= 0:
+
+        # Check current stock count against max limit
+        if len(current_positions) >= self.absolute_max_stocknum:
+            log.info(f"[{self.name}] 当前持股数量已达上限: {len(current_positions)}/{self.absolute_max_stocknum}")
             return
-        final_buy = buy_lists[:slot]
+
+        # Calculate available slots
+        available_slots = min(self.max_hold_stocknum - len(current_positions),
+                              self.absolute_max_stocknum - len(current_positions))
+
+        if available_slots <= 0:
+            return
+
+        final_buy = buy_lists[:available_slots]
         if len(final_buy) > 0:
             each_value = (subp.cash + self.out_cash) / len(final_buy)
             for stock in final_buy:
                 if stock not in subp.positions:
-                    order_target_value(stock, each_value, pindex=self.subportfolio_index)
+                    self._place_split_order(context, stock, each_value)
+
+    # New method to handle order splitting logic
+    def _place_split_order(self, context, security, total_amount):
+        """
+        Place orders with splitting based on order size
+        Parameters:
+            security: stock to buy
+            total_amount: total order value
+        """
+        if total_amount <= self.split_order_threshold:
+            # Case 1: Small order (<= 50000) - place immediately
+            log.info(f"[{self.name}] 小额订单直接执行: {security}, 金额: {total_amount}")
+            order_value(security, total_amount, pindex=self.subportfolio_index)
+        else:
+            # Split order based on size
+            current_time = context.current_dt
+            remaining = total_amount
+            num_splits = 0
+
+            # Calculate number of splits needed
+            if total_amount <= 2 * self.split_order_threshold:  # 50000-100000
+                num_splits = 2
+            elif total_amount <= 3 * self.split_order_threshold:  # 100000-150000
+                num_splits = 3
+            else:  # > 150000
+                num_splits = 4
+
+            log.info(f"[{self.name}] 订单拆分: {security}, 总金额: {total_amount}, 拆分为: {num_splits}笔")
+
+            # First order placed immediately
+            first_amount = min(self.max_single_order, remaining)
+            order_value(security, first_amount, pindex=self.subportfolio_index)
+            log.info(f"[{self.name}] 第1笔订单: {security}, 金额: {first_amount}")
+            remaining -= first_amount
+
+            # Schedule remaining orders
+            for i in range(1, num_splits):
+                if remaining <= 0:
+                    break
+
+                # Calculate amount for this split
+                if i == num_splits - 1:  # Last split - use all remaining
+                    split_amount = remaining
+                else:
+                    split_amount = min(self.max_single_order, remaining)
+
+                # Schedule for later execution
+                execution_time = current_time + datetime.timedelta(minutes=i * self.split_interval_minutes)
+                self.pending_orders.append((security, split_amount, execution_time))
+                log.info(f"[{self.name}] 安排第{i + 1}笔订单: {security}, 金额: {split_amount}, 时间: {execution_time}")
+                remaining -= split_amount
 
     def _get_security_universe(self, context):
         temp = []
