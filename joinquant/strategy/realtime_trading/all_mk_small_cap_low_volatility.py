@@ -11,6 +11,7 @@ import math
 from six import StringIO, BytesIO
 import pandas as pd
 from mysqltrade import *
+from split_order_manager import SplitOrderManager
 
 
 ## 初始化函数，设定要操作的股票、基准等等
@@ -23,6 +24,20 @@ def after_code_changed(context):
     g.first = 1
     g.out_cash = 0
     g.paused = []
+
+    # 全局拆单参数
+    # 阈值：<= split_order_threshold 则直接下单；>threshold 则拆单
+    g.split_order_threshold = 50000  # 小额直下阈值（元）
+    g.max_single_order = 50000  # 每笔最大拆单金额（元）
+    g.max_splits = 4  # 最大拆单笔数
+    g.split_interval_minutes = 4  # 拆单间隔（分钟）
+    # 实例化拆单管理器
+    g.som = SplitOrderManager(
+        split_threshold=g.split_order_threshold,
+        max_leg=g.max_single_order,
+        max_splits=g.max_splits,
+        interval_minutes=g.split_interval_minutes
+    )
 
     # 设定基准
     set_benchmark('000300.XSHG')
@@ -69,6 +84,12 @@ def after_code_changed(context):
     run_daily(selled_security_list_count, 'after_close')  # 卖出股票日期计数
     run_daily(after_market_close, 'after_close')  # 卖出股票日期计数
 
+    # 每个bar执行一次，处理待执行拆单
+    run_daily(process_pending, time='every_bar')
+
+# 定时执行函数：每个bar调用，处理待执行拆单订单
+def process_pending(context):
+    g.som.execute_pending(context)
 
 #######################！！！新手需要使用的地方！！！###################################################
 ##动态仓位、频率、计数初始化函数(持仓比例，选股频率，买入频率，卖出频率在这里设置)
@@ -144,7 +165,7 @@ def main_stock_pick(context):
         s_list = list(context.portfolio.positions.keys())
         print(s_list)
         for s in s_list:
-            order_target_value_(context, s, 0)
+            g.som.order_target_value_(context, s, 0)
         return
 
     ####自定义编辑范围#####
@@ -247,7 +268,7 @@ def no_zt_sell(context):
         if df2_3['close'][-1] == df2_3['high_limit'][-1]:
             c.append(stock)
         else:
-            order_target_(context, stock, 0)
+            g.som.order_target_(context, stock, 0)
             g.notbuy.append(stock)
 
 
@@ -331,7 +352,7 @@ def sell_every_day(context):
     open_sell_securities = [s for s in context.portfolio.positions.keys() if s in g.open_sell_securities]
     if len(open_sell_securities) > 0:
         for stock in open_sell_securities:
-            order_target_value_(context, stock, 0)
+            g.som.order_target_value_(context, stock, 0)
     g.open_sell_securities = [s for s in g.open_sell_securities if s in context.portfolio.positions.keys()]
     return
 
@@ -389,7 +410,7 @@ def sell(context, buy_lists):
     # 卖出股票
     if len(sell_lists) > 0:
         for stock in sell_lists:
-            order_target_(context, stock, 0)
+            g.som.order_target_(context, stock, 0)
 
     # 获取卖出的股票, 并加入到 g.selled_security_list中
     selled_security_list_dict(context, init_sl)
@@ -414,7 +435,7 @@ def buy(context, buy_lists):
             if g.max_hold_stocknum > position_count:
                 value = (context.portfolio.cash + g.out_cash) / (g.max_hold_stocknum - position_count)
                 if context.portfolio.positions[stock].total_amount == 0:
-                    order_target_value_(context, stock, value)
+                    g.som.order_target_value_(context, stock, value)
     return
 
 
@@ -602,7 +623,7 @@ def change_cash(context):
                 if is_sell == "是":
                     log.info("入金后先清仓，再重新买入，清仓股票为", list(context.portfolio.positions.keys()))
                     for s in context.portfolio.positions:
-                        order_target_(context, s, 0)
+                        g.som.order_target_(context, s, 0)
                 df2.loc[0, "是否清仓后重新买入"] = "否"
                 change_cash = df2.at[0, "入金金额"]
                 log.info("入金金额", change_cash)

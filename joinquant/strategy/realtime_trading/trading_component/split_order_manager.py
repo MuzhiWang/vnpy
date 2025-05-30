@@ -1,7 +1,7 @@
 import datetime
 import math
 from kuanke.wizard import log
-import mysql_trade as mt
+import mysqltrade as mt
 
 class SplitOrderManager:
     """
