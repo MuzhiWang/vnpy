@@ -44,3 +44,5 @@ env
 
 # Private
 vnpy/app/cta_strategy/strategies/sma_grid_mix_strategy.py
+joinquant/strategy/history_version/*
+
