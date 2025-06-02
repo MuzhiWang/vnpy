@@ -3,6 +3,31 @@ import math
 from kuanke.wizard import log
 import mysqltrade as mt
 
+
+class PendingOrder:
+    """
+    表示一个待执行的拆分订单。
+    """
+    def __init__(self, func, context, security, amount, exec_time):
+        """
+        :param func: 下单函数
+        :param context: 策略上下文
+        :param security: 证券代码
+        :param amount: 交易金额
+        :param exec_time: 执行时间
+        """
+        self.func = func
+        self.context = context
+        self.security = security
+        self.amount = amount
+        self.exec_time = exec_time
+
+    def execute(self, context=None):
+        """执行订单"""
+        if context is None:
+            context = self.context
+        return self.func(context, self.security, self.amount)
+
 class SplitOrderManager:
     """
     将大额订单拆分为小额订单并定时执行。
@@ -20,7 +45,7 @@ class SplitOrderManager:
         self.max_leg = max_leg
         self.max_splits = max_splits
         self.interval = datetime.timedelta(minutes=interval_minutes)
-        # pending 存储待执行的拆单订单，每项 dict 包含 func, context, security, amount, exec_time
+        # PendingOrder instances to store pending split orders
         self.pending = []
 
     def _should_split(self, amount):
@@ -57,13 +82,8 @@ class SplitOrderManager:
         # 安排后续
         for i, amt in enumerate(legs[1:], start=1):
             exec_time = now + self.interval * i
-            self.pending.append({
-                'func': func,
-                'context': context,
-                'security': security,
-                'amount': amt,
-                'exec_time': exec_time
-            })
+            pending_order = PendingOrder(func, context, security, amt, exec_time)
+            self.pending.append(pending_order)
             log.info(f"[拆单管理] 安排第{i+1}笔: {security} 金额: {amt} 执行时间: {exec_time}")
 
     def place(self, func, context, security, amount):
@@ -85,13 +105,10 @@ class SplitOrderManager:
         执行所有到达执行时间的拆单订单，需在每个 bar 调用
         """
         now = context.current_dt
-        ready = [p for p in self.pending if p['exec_time'] <= now]
+        ready = [p for p in self.pending if p.exec_time <= now]
         for p in ready:
-            func = p['func']
-            sec = p['security']
-            amt = p['amount']
-            log.info(f"[拆单管理] 执行待处理拆单: {sec} 金额: {amt}")
-            func(p['context'], sec, amt)
+            log.info(f"[拆单管理] 执行待处理拆单: {p.security} 金额: {p.amount} 执行时间: {p.exec_time}")
+            p.execute(context)
             self.pending.remove(p)
 
     def order_(self, context, security, amount):
@@ -112,4 +129,4 @@ class SplitOrderManager:
 
     def get_pending(self):
         """返回待执行订单列表 (security, amount, exec_time)"""
-        return [(p['security'], p['amount'], p['exec_time']) for p in self.pending]
+        return [(p.security, p.amount, p.exec_time) for p in self.pending]
