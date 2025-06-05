@@ -33,6 +33,7 @@ def after_code_changed(context):
     g.split_interval_minutes = 4  # 拆单间隔（分钟）
     # 实例化拆单管理器
     g.som = SplitOrderManager(
+        price_func=get_latest_price,
         split_threshold=g.split_order_threshold,
         max_leg=g.max_single_order,
         max_splits=g.max_splits,
@@ -90,6 +91,11 @@ def after_code_changed(context):
 # 定时执行函数：每个bar调用，处理待执行拆单订单
 def process_pending(context):
     g.som.execute_pending(context)
+
+def get_latest_price(context, security):
+    df = get_current_data(security, end_date=context.current_dt, frequency='1m', count=1)
+    # return df['close'].iloc[0] if df is not None and not df.empty else None
+    return df
 
 #######################！！！新手需要使用的地方！！！###################################################
 ##动态仓位、频率、计数初始化函数(持仓比例，选股频率，买入频率，卖出频率在这里设置)

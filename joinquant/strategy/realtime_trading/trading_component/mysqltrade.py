@@ -43,9 +43,13 @@ class MysqlTrade:
             pre_amt = 0
             if security in context.portfolio.positions:
                 pre_amt = context.portfolio.positions[security].total_amount
-            #
+
+            log.info(f"[mysql_trade] 下单前的现金：{pre_cash}，股票数量：{pre_amt}, 股票代码：{security}, arguments: {args}, kwargs: {kwargs}")
+
             my_order = func(*args, **kwargs)
             if my_order is not None:
+                log.info(f"[mysql_trade] 订单信息 raw order: {my_order}")
+
                 if my_order.is_buy:  # 买入，看现金
                     new_cash = context.portfolio.available_cash  # 10W
                     new_amt = context.portfolio.positions[security].total_amount
@@ -77,7 +81,7 @@ class MysqlTrade:
                     'pct': pct,
                     'strategy': g.strategy
                 }
-                log.info(data)
+                log.info(f"[mysql_trade] 订单信息 data: {json.dumps(data, ensure_ascii=False)}")
 
                 if context.run_params.type == 'sim_trade' or MysqlTrade.mode == 0:  # mode = 0: 测试； mode == 1：正式
 
@@ -89,9 +93,15 @@ class MysqlTrade:
                         order = Stock(time=time, action=action, code=code, amt=amt, pct=pct, strategy=strategy,
                                       isconsum='NO', mode=MysqlTrade.mode)
                         # session.merge(order)
+                        log.info(f"[mysql_trade] 订单信息 stock order: {order}")
+
                         session.add(order)
                         session.commit()
                         session.close()
+            else:
+                log.info("[mysql_trade] 订单返回None，未进行交易")
+                return None
+
 
             return my_order
 
@@ -118,14 +128,14 @@ class MysqlTrade:
                                        pool_size=100, pool_recycle=3600,
                                        pool_pre_ping=True)
                 conn = engine.connect()
-                log.info("成功连接到MySQL数据库！")
+                log.info("[mysql_trade] 成功连接到MySQL数据库！")
                 return engine, conn
             except Exception as e:
                 # 如果连接失败，打印错误信息并尝试重新连接
-                log.info(f"连接MySQL数据库失败，错误信息：{e}")
+                log.info(f"[mysql_trade] 连接MySQL数据库失败，错误信息：{e}")
                 attempts += 1
                 time.sleep(10)
-        log.info(f"连接MySQL数据库失败，已达到最大尝试次数：{max_attempts}")
+        log.info(f"[mysql_trade] 连接MySQL数据库失败，已达到最大尝试次数：{max_attempts}")
         engine = "fail"
         conn = "fail"
         return engine, conn
