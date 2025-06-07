@@ -54,6 +54,8 @@
         <div class="action-buttons">
             <input id="new-item-name" type="text" placeholder="新增物品名称" style="flex:1;" />
             <button class="add-btn" onclick="addNewItemName()">添加名称到列表</button>
+            <select id="remove-item-name" style="flex:1;"></select>
+            <button class="add-btn" onclick="removeItemName()">删除选中名称</button>
         </div>
         <div class="table-container">
             <div class="headers">
@@ -85,97 +87,82 @@
         ];
         window.onload = function() {
             loadItemNamesFromStorage();
+            updateRemoveDropdown();
             loadItemsFromStorage();
         };
         function addNewItemName() {
             const input = document.getElementById('new-item-name');
             const name = input.value.trim();
-            if (!name) return;
-            if (!itemNames.includes(name)) {
-                itemNames.push(name);
-                saveItemNamesToStorage();
-                updateAllSelectOptions();
-            }
+            if (!name || itemNames.includes(name)) { input.value = ''; return; }
+            itemNames.push(name);
+            saveItemNamesToStorage();
+            updateAllSelectOptions();
+            updateRemoveDropdown();
             input.value = '';
+        }
+        function removeItemName() {
+            const sel = document.getElementById('remove-item-name');
+            const name = sel.value;
+            itemNames = itemNames.filter(n => n !== name);
+            saveItemNamesToStorage();
+            updateAllSelectOptions();
+            updateRemoveDropdown();
         }
         function saveItemNamesToStorage() {
             localStorage.setItem('calculatorItemNames', JSON.stringify(itemNames));
         }
         function loadItemNamesFromStorage() {
             const saved = localStorage.getItem('calculatorItemNames');
-            if (saved) {
-                itemNames = JSON.parse(saved);
-            } else {
-                itemNames = defaultItems.map(i=>i.name);
-                saveItemNamesToStorage();
-            }
+            if (saved) itemNames = JSON.parse(saved);
+            else { itemNames = defaultItems.map(i => i.name); saveItemNamesToStorage(); }
         }
         function updateAllSelectOptions() {
             document.querySelectorAll('.item-row select').forEach(sel => {
-                const current = sel.value;
+                const cur = sel.value;
                 sel.innerHTML = itemNames.map(n => `<option value="${n}">${n}</option>`).join('');
-                sel.value = current;
+                sel.value = cur;
             });
         }
-        function addItem() {
-            addItemWithValues('', 0.0, 1);
-            saveItemsToStorage();
+        function updateRemoveDropdown() {
+            const rem = document.getElementById('remove-item-name');
+            rem.innerHTML = itemNames.map(n => `<option value="${n}">${n}</option>`).join('');
         }
+        function addItem() { addItemWithValues('', 0.0, 1); saveItemsToStorage(); }
         function addItemWithValues(name, price, quantity) {
             const container = document.getElementById('items-container');
             const itemId = itemCounter++;
-            const row = document.createElement('div');
-            row.className = 'item-row'; row.id = `item-${itemId}`;
+            const row = document.createElement('div'); row.className='item-row'; row.id=`item-${itemId}`;
             row.innerHTML = `
                 <div class="name-col col">
                     <select id="name-${itemId}" onchange="saveItemsToStorage()"></select>
                 </div>
                 <div class="price-col col">
                     <div class="price-stepper">
-                        <div class="stepper-btn decrement" onclick="adjustPrice(${itemId}, -0.1)">-</div>
+                        <div class="stepper-btn decrement" onclick="adjustPrice(${itemId},-0.1)">-</div>
                         <input type="number" id="price-${itemId}" step="0.1" min="0" value="${price.toFixed(1)}" onchange="updateItemTotal(${itemId})">
-                        <div class="stepper-btn increment" onclick="adjustPrice(${itemId}, 0.1)">+</div>
+                        <div class="stepper-btn increment" onclick="adjustPrice(${itemId},0.1)">+</div>
                     </div>
                 </div>
                 <div class="quantity-col col">
                     <input type="number" id="quantity-${itemId}" min="0" value="${quantity}" onchange="updateItemTotal(${itemId})">
                 </div>
-                <div class="total-col col">
-                    <div class="item-total" id="total-${itemId}">0</div>
-                </div>
-                <div class="action-col col">
-                    <button class="remove-btn" onclick="removeItem(${itemId})">×</button>
-                </div>`;
+                <div class="total-col col"><div class="item-total" id="total-${itemId}">0</div></div>
+                <div class="action-col col"><button class="remove-btn" onclick="removeItem(${itemId})">×</button></div>`;
             container.appendChild(row);
             updateSelectFor(itemId, name);
             updateItemTotal(itemId);
         }
         function updateSelectFor(id, selected) {
-            const sel = document.getElementById(`name-${id}`);
+            const sel=document.getElementById(`name-${id}`);
             sel.innerHTML = itemNames.map(n=>`<option value="${n}">${n}</option>`).join('');
-            if (selected && itemNames.includes(selected)) sel.value = selected;
+            if(selected && itemNames.includes(selected)) sel.value=selected;
         }
         function removeItem(id) { document.getElementById(`item-${id}`)?.remove(); calculateAll(); saveItemsToStorage(); }
-        function adjustPrice(id, amt) { const inp = document.getElementById(`price-${id}`); let v=parseFloat(inp.value)||0; v=Math.max(0,(v+amt).toFixed(1)); inp.value=v; updateItemTotal(id); }
-        function updateItemTotal(id) { const price=parseFloat(document.getElementById(`price-${id}`).value)||0; const qty=parseInt(document.getElementById(`quantity-${id}`).value)||0; document.getElementById(`total-${id}`).textContent=(price*qty).toFixed(2); calculateAll(); saveItemsToStorage(); }
-        function calculateAll() { let sum=0; document.querySelectorAll('.item-row').forEach(r=>{const id=r.id.split('-')[1]; const p=parseFloat(document.getElementById(`price-${id}`).value)||0; const q=parseInt(document.getElementById(`quantity-${id}`).value)||0; sum+=p*q;}); document.getElementById('grand-total').textContent=sum.toFixed(2)+' R'; }
-        function saveItemsToStorage() {
-            const items=[];
-            document.querySelectorAll('.item-row').forEach(r=>{
-                const id=r.id.split('-')[1];
-                items.push({ name: document.getElementById(`name-${id}`).value,
-                             price: parseFloat(document.getElementById(`price-${id}`).value)||0,
-                             quantity: parseInt(document.getElementById(`quantity-${id}`).value)||0 });
-            });
-            localStorage.setItem('calculatorItems', JSON.stringify(items));
-        }
-        function loadItemsFromStorage() {
-            const saved=localStorage.getItem('calculatorItems');
-            document.getElementById('items-container').innerHTML='';
-            if (saved) JSON.parse(saved).forEach(it=>addItemWithValues(it.name,it.price,it.quantity));
-            else defaultItems.forEach(it=>addItemWithValues(it.name,it.price,it.quantity));
-            updateAllSelectOptions(); calculateAll();
-        }
+        function adjustPrice(id,amt){ const inp=document.getElementById(`price-${id}`); let v=parseFloat(inp.value)||0; v=Math.max(0,(v+amt).toFixed(1)); inp.value=v; updateItemTotal(id);}
+        function updateItemTotal(id){const p=parseFloat(document.getElementById(`price-${id}`).value)||0;const q=parseInt(document.getElementById(`quantity-${id}`).value)||0;document.getElementById(`total-${id}`).textContent=(p*q).toFixed(2);calculateAll();saveItemsToStorage();}
+        function calculateAll(){let sum=0;document.querySelectorAll('.item-row').forEach(r=>{const id=r.id.split('-')[1];const p=parseFloat(document.getElementById(`price-${id}`).value)||0;const q=parseInt(document.getElementById(`quantity-${id}`).value)||0;sum+=p*q;});document.getElementById('grand-total').textContent=sum.toFixed(2)+' R';}
+        function saveItemsToStorage(){const items=[];document.querySelectorAll('.item-row').forEach(r=>{const id=r.id.split('-')[1];items.push({name:document.getElementById(`name-${id}`).value,price:parseFloat(document.getElementById(`price-${id}`).value)||0,quantity:parseInt(document.getElementById(`quantity-${id}`).value)||0});});localStorage.setItem('calculatorItems',JSON.stringify(items));}
+        function loadItemsFromStorage(){const saved=localStorage.getItem('calculatorItems');document.getElementById('items-container').innerHTML='';if(saved) JSON.parse(saved).forEach(it=>addItemWithValues(it.name,it.price,it.quantity));else defaultItems.forEach(it=>addItemWithValues(it.name,it.price,it.quantity));updateAllSelectOptions();calculateAll();}
     </script>
 </body>
 </html>
