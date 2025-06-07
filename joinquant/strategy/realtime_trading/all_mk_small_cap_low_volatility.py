@@ -85,8 +85,25 @@ def after_code_changed(context):
     run_daily(selled_security_list_count, 'after_close')  # 卖出股票日期计数
     run_daily(after_market_close, 'after_close')  # 卖出股票日期计数
 
-    # 每个bar执行一次，处理待执行拆单
-    run_daily(process_pending, time='every_bar')
+    # # 每个bar执行一次，处理待执行拆单
+    # run_daily(process_pending, time='every_bar')
+
+    # ——— 9:30 到 14:55 之间每 2 分钟执行一次 process_pending ———
+    start_time = datetime.time(9, 30)
+    end_time = datetime.time(14, 55)
+
+    # 先生成当天从 09:30 到 14:55，每隔 2 分钟的时间字符串列表
+    today = context.current_dt.date()
+    dt = datetime.datetime.combine(today, start_time)
+    end_dt = datetime.datetime.combine(today, end_time)
+    time_slots = []
+    while dt <= end_dt:
+        time_slots.append(dt.strftime('%H:%M'))
+        dt += datetime.timedelta(minutes=2)
+
+    # 对每个时刻都调用 run_daily
+    for tm in time_slots:
+        run_daily(process_pending, time=tm)
 
 # 定时执行函数：每个bar调用，处理待执行拆单订单
 def process_pending(context):
