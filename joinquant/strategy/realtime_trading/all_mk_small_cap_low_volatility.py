@@ -27,15 +27,15 @@ def after_code_changed(context):
 
     # 全局拆单参数
     # 阈值：<= split_order_threshold 则直接下单；>threshold 则拆单
-    g.split_order_threshold = 10000  # 小额直下阈值（元）
-    g.max_single_order = 5000  # 每笔最大拆单金额（元）
+    g.split_order_threshold = 50000  # 小额直下阈值（元）
+    g.max_single_order = 50000  # 每笔最大拆单金额（元）
     g.max_splits = 4  # 最大拆单笔数
     g.split_interval_minutes = 4  # 拆单间隔（分钟）
     # 实例化拆单管理器
     g.som = SplitOrderManager(
         get_current_data_func=get_current_data_for_security,
         split_threshold=g.split_order_threshold,
-        max_leg=g.max_single_order,
+        max_value=g.max_single_order,
         max_splits=g.max_splits,
         interval_minutes=g.split_interval_minutes
     )
