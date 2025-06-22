@@ -455,7 +455,8 @@ def buy(context, buy_lists):
         for stock in buy_lists:
             position_count = len(context.portfolio.positions)
             if g.max_hold_stocknum > position_count:
-                value = (context.portfolio.cash + g.out_cash) / (g.max_hold_stocknum - position_count)
+                cash = g.som.get_available_balance(context).available_cash
+                value = (cash + g.out_cash) / (g.max_hold_stocknum - position_count)
                 if context.portfolio.positions[stock].total_amount == 0:
                     g.som.order_target_value_(context, stock, value)
     return
