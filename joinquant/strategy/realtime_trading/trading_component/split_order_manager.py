@@ -47,6 +47,7 @@ class PendingOrder:
                 log.warn(f"[PendingOrder] 执行订单 返回 None: {self.security} 股数: {self.shares} 市值: {self.value}")
         except Exception as e:
             log.error(f"[PendingOrder] 执行订单失败: {self.security} 股数: {self.shares} 市值: {self.value}, 错误: {e}")
+            raise e  # 重新抛出异常以便上层捕获
 
 
 class Balance:
@@ -343,10 +344,13 @@ class SplitOrderManager:
     def execute_pending(self, context):
         """
         每个 Bar 调用，执行到期拆单
+        若订单执行失败，会重新安排在该股票最后一笔订单之后执行
         """
         now = context.current_dt
         ready = [p for p in self.pending if p.exec_time <= now]
         for p in ready:
+            self.pending.remove(p)  # 先移除，避免重复处理
+
             sec = p.security
             shares = p.shares
             action = "未知"
@@ -372,8 +376,28 @@ class SplitOrderManager:
                 # 更新 pending 订单的 value 为目标市值
                 p.value = target_value
                 log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{p.idx + 1}单 市值 {abs(p.value)}")
-            p.execute(context)
-            self.pending.remove(p)
+
+            try:
+                # 尝试执行订单
+                p.execute(context)
+            except Exception as e:
+                # 查找同一股票的所有订单
+                same_security_orders = [o for o in self.pending if o.security == sec]
+
+                if same_security_orders:
+                    # 找到同一股票的最后一笔订单
+                    last_order = max(same_security_orders, key=lambda o: o.exec_time)
+                    new_exec_time = last_order.exec_time + self.interval
+                else:
+                    # 没有其他订单，按默认延迟执行
+                    new_exec_time = now + self.interval
+
+                # 更新执行时间和重试计数
+                p.exec_time = new_exec_time
+
+                # 重新添加到待执行列表
+                self.pending.append(p)
+                log.info(f"[拆单管理] 重新安排失败的{action}订单: {sec}, 新执行时间: {new_exec_time}")
 
     def get_pending(self):
         """返回待执行订单 (security, shares, exec_time) 列表"""
