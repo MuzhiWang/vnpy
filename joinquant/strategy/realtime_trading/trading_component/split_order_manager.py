@@ -278,57 +278,33 @@ class SplitOrderManager:
         sign = 1 if delta_value > 0 else -1
         self._schedule_value(context, security, value_slices, sign, target_value)
 
-    # def place_order_value(self, context, security, target_value):
-    #     """
-    #     按市值 total_amount 下单: 自动识别买卖方向，并拆分交易。
-    #     """
-    #     price = self._get_price(context, security)
-    #     if price is None or price <= 0:
-    #         log.error(f"[拆单管理] 无法获取 {security} 最新价格，跳过")
-    #         return
-    #
-    #     # 目标持仓股数 (100 股单位)
-    #     target_shares = int((target_value / price) // 100) * 100
-    #     # if target_shares < 100:
-    #     #     log.warn(f"[拆单管理] 金额 {target_value} 对应 <100 股({target_shares}股)，跳过 {security}")
-    #     #     return
-    #
-    #     # 当前持仓股数
-    #     current_pos = self._get_current_position(context, security)
-    #
-    #     # 需调整股数 (正买, 负卖)
-    #     delta_shares = target_shares - current_pos
-    #     if abs(delta_shares) < 100:
-    #         log.warn(f"[拆单管理] {security} 目标 {target_shares} 股, 当前 {current_pos} 股, 差额 <100, 跳过")
-    #         return
-    #
-    #     # 若市值 ≤ 阈值, 直接调整持仓到目标
-    #     if target_value <= self.split_threshold:
-    #         log.info(f"[拆单管理] 直接调整持仓 {security} 到 {target_shares} 股")
-    #         return mt.order_target_(context, security, target_shares)
-    #
-    #     # # 拆单：计算单笔最大股数
-    #     max_leg_shares = int((self.max_value / price) // 100) * 100
-    #     if max_leg_shares < 100:
-    #         log.info(f"[拆单管理] max_leg({self.max_value}元) 对应 <100 股, 直接调整 {security} 到 {target_shares} 股")
-    #         return mt.order_target_(context, security, target_shares)
-    #
-    #     abs_shares = abs(delta_shares)
-    #     share_slices = self._compute_share_slices(abs_shares, max_leg_shares)
-    #     action = "买入" if delta_shares > 0 else "卖出"
-    #     log.info(f"[拆单管理] 拆分 {security} {action} 总股数 {abs_shares} 分 {len(share_slices)} 笔: {share_slices}")
-    #
-    #     sign = 1 if delta_shares > 0 else -1
-    #     self._schedule_shares(context, security, share_slices, sign)
-
     def order_target_value_(self, context, security, target_value):
         """与 mysql_trade order_target_value_ 同名接口，按市值拆分下单"""
         log.info(f"[拆单管理] 请求 {security} 目标市值 {target_value} 元")
         return self.place_order_value(context, security, target_value)
 
-    # def order_value_(self, context, security, amount):
-    #     """与 mysql_trade order_value_ 同名接口，按市值拆分下单"""
-    #     return self.place_order_value(context, security, amount)
+    def order_value_(self, context, security, amount):
+        """与 mysql_trade order_value_ 同名接口，按市值拆分下单
+
+        :param context: 策略上下文
+        :param security: 证券代码
+        :param amount: 交易金额，正数买入，负数卖出
+        """
+        log.info(f"[拆单管理] 请求 {security} {'买入' if amount > 0 else '卖出'}市值 {abs(amount)} 元")
+
+        price = self._get_price(context, security)
+        if price is None or price <= 0:
+            log.error(f"[拆单管理] 无法获取 {security} 最新价格，跳过")
+            return
+
+        # 当前持仓市值
+        current_pos = self._get_current_position(context, security)
+        current_value = current_pos * price
+
+        # 目标市值 = 当前市值 + 要交易的金额
+        target_value = current_value + amount
+
+        return self.place_order_value(context, security, target_value)
 
     def order_target_(self, context, security, shares):
         """与 mysql_trade order_target_ 同名接口，按目标持仓拆单下单"""
