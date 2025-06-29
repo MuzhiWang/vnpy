@@ -453,7 +453,9 @@ def buy(context, buy_lists):
     if len(buy_lists) > 0:
         # 分配资金
         for stock in buy_lists:
-            position_count = len(context.portfolio.positions)
+            # position_count = len(context.portfolio.positions)
+            position_count = g.som.get_available_balance(context).get_remaining_securities_count()
+            log.info(f'[TTTTT] 买入股票: {stock} 当前实际持仓数量: {len(context.portfolio.positions)}, 当前计算后持仓数量: {position_count}')
             if g.max_hold_stocknum > position_count:
                 cash = g.som.get_available_balance(context).available_cash
                 value = (cash + g.out_cash) / (g.max_hold_stocknum - position_count)

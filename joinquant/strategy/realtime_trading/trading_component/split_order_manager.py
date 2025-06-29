@@ -56,10 +56,17 @@ class Balance:
     and pending orders that will affect the balance.
     """
 
+    DEFAULT_GET_REMAINING_SECURITIES_DIFF = 100  # 默认允许的持仓差异，用于判断是否仍持有某证券
+
     def __init__(self, current_cash=0, pending_buy=0, pending_sell=0):
         self.current_cash = current_cash  # Current cash balance
         self.pending_buy = pending_buy  # Cash reserved for pending buy orders
         self.pending_sell = pending_sell  # Expected cash from pending sell orders
+
+        # 持仓信息
+        self.positions = {}               # 当前持仓 {security: amount}
+        self.pending_sell_securities = {} # 待卖出证券 {security: amount}
+
 
     @property
     def available_cash(self):
@@ -75,6 +82,24 @@ class Balance:
         Returns the projected total cash after all pending orders are executed.
         """
         return self.current_cash - self.pending_buy + self.pending_sell
+
+    def get_remaining_securities(self):
+        """
+        返回考虑待卖出订单后仍将持有的证券列表。
+        排除了计划全部卖出的证券。
+        """
+        result = []
+        for security, amount in self.positions.items():
+            sell_amount = self.pending_sell_securities.get(security, 0)
+            if abs(amount - sell_amount) > Balance.DEFAULT_GET_REMAINING_SECURITIES_DIFF:  # 允许小于1000金额的误差
+                result.append(security)
+        return result
+
+    def get_remaining_securities_count(self):
+        """
+        返回考虑待卖出订单后仍将持有的证券数量。
+        """
+        return len(self.get_remaining_securities())
 
     def __str__(self):
         return (f"Balance(current={self.current_cash:.2f}, "
@@ -405,19 +430,22 @@ class SplitOrderManager:
 
     def get_available_balance(self, context) -> Balance:
         """
-        Calculate available cash balance considering pending orders.
+        计算可用现金余额和未来持仓状态，考虑待处理订单的影响。
 
-        Accounts for:
-        - Cash reserved for pending buy orders
-        - Expected cash from pending sell orders
+        考虑因素:
+        - 为待处理买入订单预留的现金
+        - 待处理卖出订单预计收到的现金
+        - 待卖出的证券数量
 
-        :param context: Strategy context with portfolio information
-        :return: Balance object with detailed cash information
+        :param context: 策略上下文，包含投资组合信息
+        :return: Balance 对象，包含详细的现金和持仓信息
         """
         # Start with current cash balance
         current_cash = context.portfolio.cash
-        pending_buy = 0
-        pending_sell = 0
+        balance = Balance(current_cash, 0, 0)
+        # 填充当前持仓信息
+        for security, position in context.portfolio.positions.items():
+            balance.positions[security] = position.total_amount
 
         # Process all pending orders
         for pending_order in self.pending:
@@ -429,34 +457,48 @@ class SplitOrderManager:
                 continue
 
             if pending_order.value is not None:
-                # Handle orders with target value
+                # 处理按市值下单的订单
                 if pending_order.value < 0:
-                    # Selling - will add cash
-                    pending_sell += abs(pending_order.value)
+                    # 卖出 - 将增加现金
+                    sell_value = abs(pending_order.value)
+                    balance.pending_sell += sell_value
+
+                    # 估算卖出股数
+                    current_pos = balance.positions.get(security, 0)
+                    if current_pos > 0:
+                        approx_shares = min(current_pos, int(sell_value / price))
+                        if security not in balance.pending_sell_securities:
+                            balance.pending_sell_securities[security] = 0
+                        balance.pending_sell_securities[security] += approx_shares
                 else:
-                    # Buying - will use cash
-                    pending_buy += pending_order.value
+                    # 买入 - 将使用现金
+                    balance.pending_buy += pending_order.value
 
             elif pending_order.shares is not None:
-                # Handle orders with target shares
-                order_value = pending_order.shares * price
+                # 处理按股数下单的订单
                 if pending_order.shares < 0:
-                    # Selling - will add cash
-                    pending_sell += abs(order_value)
+                    # 卖出 - 将增加现金
+                    sell_shares = abs(pending_order.shares)
+                    balance.pending_sell += sell_shares * price
+
+                    if security not in balance.pending_sell_securities:
+                        balance.pending_sell_securities[security] = 0
+                    balance.pending_sell_securities[security] += sell_shares
                 else:
-                    # Buying - will use cash
-                    pending_buy += order_value
+                    # 买入 - 将使用现金
+                    balance.pending_buy += pending_order.shares * price
 
             elif pending_order.sell_all:
-                # Handle sell all orders
-                current_pos = self._get_current_position(context, security)
-                sell_value = current_pos * price
-                pending_sell += sell_value
+                # 处理卖出全部持仓的订单
+                current_pos = balance.positions.get(security, 0)
+                if current_pos > 0:
+                    sell_value = current_pos * price
+                    balance.pending_sell += sell_value
+                    balance.pending_sell_securities[security] = current_pos  # 全部卖出
 
-        balance = Balance(current_cash, pending_buy, pending_sell)
-
-        # Log balance details before returning
-        log.info(
-            f"[拆单管理] SOM余额计算: 当前现金={balance.current_cash:.2f}, 待买入={balance.pending_buy:.2f}, 待卖出={pending_sell:.2f}, 可用={balance.available_cash:.2f}")
+        log.info(f"[拆单管理] 余额计算: 当前现金={balance.current_cash:.2f}, "
+                 f"待买入={balance.pending_buy:.2f}, "
+                 f"待卖出={balance.pending_sell:.2f}, "
+                 f"可用={balance.available_cash:.2f}")
 
         return balance
