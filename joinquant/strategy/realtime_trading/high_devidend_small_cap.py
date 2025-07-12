@@ -5,9 +5,9 @@ import numpy as np
 import jqdata
 from kuanke.wizard import *
 from six import StringIO, BytesIO
-
 from mysqltrade import *
 from jqfactor import get_factor_values
+from split_order_manager import SplitOrderManager
 
 
 def after_code_changed(context):
@@ -20,8 +20,26 @@ def after_code_changed(context):
     g.first = 1
     g.out_cash = 0
     g.high_limit_list = []
-    set_option('use_real_price', True)
+
+    # 全局拆单参数
+    # 阈值：<= split_order_threshold 则直接下单；>threshold 则拆单
+    g.split_order_threshold = 50000  # 小额直下阈值（元）
+    g.max_single_order = 50000  # 每笔最大拆单金额（元）
+    g.max_splits = 4  # 最大拆单笔数
+    g.split_interval_minutes = 1  # 拆单间隔（分钟）
+    # 实例化拆单管理器
+    g.som = SplitOrderManager(
+        get_current_data_func=get_current_data_for_security,
+        split_threshold=g.split_order_threshold,
+        max_value=g.max_single_order,
+        max_splits=g.max_splits,
+        interval_minutes=g.split_interval_minutes
+    )
+
+    # 设定基准
     set_benchmark('000905.XSHG')
+    # True为开启动态复权模式，使用真实价格交易
+    set_option('use_real_price', True)
     # 模拟的时候，有滑点会导致没跌停也卖不掉的情况，所以滑点设置为0
     set_slippage(PriceRelatedSlippage(0))
     # 设置交易成本
@@ -41,12 +59,42 @@ def after_code_changed(context):
     g.reason_to_sell = 0
 
     run_daily(prepare_stock_list, time='9:05', reference_security='000300.XSHG')  # 每日9:05跑一次股票池（不交易）
-    run_daily(change_cash, "9:30")  # 检查入金
-    run_daily(no_trade, time='9:31')
-    run_weekly(my_Trader, 2, time='9:39')  # 每周的第2个交易日的9:39调仓
+    run_daily(change_cash, "9:36")  # 检查入金
+    run_daily(no_trade, time='9:35')
+    run_weekly(my_Trader, 2, time='9:38')  # 每周的第2个交易日的9:38调仓
     run_daily(stoploss, time='10:03')  # 止损函数
     run_daily(check_limit_up, time='14:25')  # 每日14:25检查一下持仓股中是否有涨停票
     run_daily(check_high_volume, time='14:47')  # 每日14:47检查一下是否异常放量，如果异常放量就卖出
+
+    # # 每个bar执行一次，处理待执行拆单
+    # run_daily(process_pending, time='every_bar')
+
+    # ——— 9:30 到 14:55 之间每 2 分钟执行一次 process_pending ———
+    start_time = datetime.time(9, 30)
+    end_time = datetime.time(14, 57)
+
+    # 先生成当天从 09:30 到 14:55，每隔 2 分钟的时间字符串列表
+    today = context.current_dt.date()
+    dt = datetime.datetime.combine(today, start_time)
+    end_dt = datetime.datetime.combine(today, end_time)
+    time_slots = []
+    while dt <= end_dt:
+        time_slots.append(dt.strftime('%H:%M'))
+        dt += datetime.timedelta(minutes=0.5)
+
+    # 对每个时刻都调用 run_daily
+    for tm in time_slots:
+        run_daily(process_pending, time=tm)
+
+
+# 定时执行函数：每个bar调用，处理待执行拆单订单
+def process_pending(context):
+    g.som.execute_pending(context)
+
+
+def get_current_data_for_security(context, security):
+    df = get_current_data(security, end_date=context.current_dt, frequency='1m', count=1)
+    return df
 
 
 # 1-1 根据最近一年分红除以当前总市值计算股息率并筛选
@@ -97,11 +145,11 @@ def get_dividend_ratio_filter_list(context, stock_list, sort, p1, p2):
 def no_trade(context):
     mon = context.current_dt.month
     day = context.current_dt.day
-    if (mon == 4 or mon == 1) and day >= 19:
+    if (mon == 4 or mon == 1) and day >= 1:
         s_list = list(context.portfolio.positions.keys())
         print(s_list)
         for s in s_list:
-            order_target_value_(context, s, 0)
+            g.som.order_target_value_(context, s, 0)
     else:
         check_remain_amount(context)
 
@@ -113,7 +161,7 @@ def my_Trader(context):
         s_list = list(context.portfolio.positions.keys())
         print(s_list)
         for s in s_list:
-            order_target_value_(context, s, 0)
+            g.som.order_target_value_(context, s, 0)
         return
 
     # all stocks
@@ -148,18 +196,21 @@ def my_Trader(context):
     for s in context.portfolio.positions:
         if (s not in choice):
             log.info('Sell', s, cdata[s].name)
-            order_target_(context, s, 0)
+            g.som.order_target_(context, s, 0)
     # buy
     g.not_buy_again = []
-    position_count = len(context.portfolio.positions)
+    # position_count = len(context.portfolio.positions)
+    position_count = g.som.get_available_balance(context).get_remaining_securities_count()
     if g.stock_num > position_count:
-        psize = (context.portfolio.available_cash + g.out_cash) / (g.stock_num - position_count)
+        cash = g.som.get_available_balance(context).available_cash
+        value = (cash + g.out_cash) / (g.stock_num - position_count)
         for s in choice:
             if s not in context.portfolio.positions:
-                log.info('buy', s, cdata[s].name)
-                order_value_(context, s, psize)
+                log.info(
+                    f'[TTTTT] 买入股票: {s} 当前实际持仓数量: {len(context.portfolio.positions)}, 当前计算后持仓数量: {position_count}')
+                g.som.order_value_(context, s, value)
                 g.not_buy_again.append(s)
-                if len(context.portfolio.positions) == g.stock_num:
+                if g.som.get_available_balance(context).get_remaining_securities_count() == g.stock_num:
                     break
 
 
@@ -193,7 +244,7 @@ def check_limit_up(context):
             if current_data[stock].last_price < current_data[stock].high_limit:
                 log.info("[%s]涨停打开，卖出" % stock)
                 g.reason_to_sell = 1
-                order_target_(context, stock, 0)
+                g.som.order_target_(context, stock, 0)
             else:
                 log.info("[%s]涨停，继续持有" % stock)
 
@@ -201,7 +252,7 @@ def check_limit_up(context):
 def stoploss(context):
     for stock in context.portfolio.positions.keys():
         if context.portfolio.positions[stock].price < context.portfolio.positions[stock].avg_cost * g.stoploss_rate:
-            order_target_value_(context, stock, 0)
+            g.som.order_target_value_(context, stock, 0)
             log.debug("止损,卖出{}".format(stock))
 
 
@@ -212,19 +263,21 @@ def check_remain_amount(context):
         for position in list(context.portfolio.positions.values()):
             stock = position.security
             g.hold_list.append(stock)
-        if len(g.hold_list) < g.stock_num:
+        position_count = g.som.get_available_balance(context).get_remaining_securities_count()
+        if position_count < g.stock_num:
             target_list = g.target_list
             # 剔除本次调仓买入的股票，不再买入
             target_list = [stock for stock in target_list if stock not in g.not_buy_again]
             target_list = target_list[:min(g.stock_num, len(target_list))]
             log.info('有余额可用' + str(round((context.portfolio.cash), 2)) + '元。' + str(target_list))
 
-            value = (context.portfolio.cash + g.out_cash) / (g.stock_num - len(g.hold_list))
+            cash = g.som.get_available_balance(context).available_cash
+            value = (cash + g.out_cash) / (g.stock_num - position_count)
             for stock in target_list:
                 if context.portfolio.positions[stock].total_amount == 0:
-                    order_target_value_(context, stock, value)
+                    g.som.order_target_value_(context, stock, value)
                     g.not_buy_again.append(stock)
-                    if len(context.portfolio.positions) == g.stock_num:
+                    if g.som.get_available_balance(context).get_remaining_securities_count() == g.stock_num:
                         break
 
         g.reason_to_sell = 0
@@ -296,7 +349,7 @@ def check_high_volume(context):
         if df_volume['volume'].values[-1] > g.HV_ratio * df_volume['volume'].values.max():
             log.info("[%s]天量，卖出" % stock)
             position = context.portfolio.positions[stock]
-            order_target_value_(context, stock, 0)
+            g.som.order_target_value_(context, stock, 0)
 
 
 def change_cash(context):
@@ -324,7 +377,7 @@ def change_cash(context):
                 if is_sell == "是":
                     log.info("入金后先清仓，再重新买入，清仓股票为", list(context.portfolio.positions.keys()))
                     for s in context.portfolio.positions:
-                        order_target_(context, s, 0)
+                        g.som.order_target_(context, s, 0)
                 df2.loc[0, "是否清仓后重新买入"] = "否"
                 change_cash = df2.at[0, "入金金额"]
                 log.info("入金金额", change_cash)
@@ -340,4 +393,4 @@ def change_cash(context):
         except Exception as e:
             log.info("修改资金发生错误: {}".format(e))
 
-        # end
+            # end
