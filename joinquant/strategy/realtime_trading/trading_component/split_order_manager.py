@@ -45,6 +45,7 @@ class PendingOrder:
                 log.info(f"[PendingOrder] 执行订单: {self.security}, 第{self.idx + 1} 股数: {self.shares} 市值: {self.value}, 结果: {res}")
             else:
                 log.warn(f"[PendingOrder] 执行订单 返回 None: {self.security} 股数: {self.shares} 市值: {self.value}")
+            return res
         except Exception as e:
             log.error(f"[PendingOrder] 执行订单失败: {self.security} 股数: {self.shares} 市值: {self.value}, 错误: {e}")
             raise e  # 重新抛出异常以便上层捕获
@@ -380,25 +381,49 @@ class SplitOrderManager:
 
             try:
                 # 尝试执行订单
-                p.execute(context)
+                res = p.execute(context)
+
+                # debug security
+                # if sec == "600159.XSHG":
+                #     log.info(f"[拆单管理][debug] 执行 {action} {sec} 订单结果: {res}")
+
+                if res is None \
+                        or res.amount == 0 \
+                        or res.status == 'canceled' \
+                        or res.filled == 0:
+                    log.warn(f"[拆单管理] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res}")
+                    self.reschedule_order(self.pending, sec, self.interval, now, p, action)
             except Exception as e:
-                # 查找同一股票的所有订单
-                same_security_orders = [o for o in self.pending if o.security == sec]
+                self.reschedule_order(self.pending, sec, self.interval, now, p, action)
 
-                if same_security_orders:
-                    # 找到同一股票的最后一笔订单
-                    last_order = max(same_security_orders, key=lambda o: o.exec_time)
-                    new_exec_time = last_order.exec_time + self.interval
-                else:
-                    # 没有其他订单，按默认延迟执行
-                    new_exec_time = now + self.interval
+    def reschedule_order(self, pending_orders, security, interval, current_time, order, action):
+        """
+        Reschedules an order by updating its execution time and re-adding it to the pending list.
 
-                # 更新执行时间和重试计数
-                p.exec_time = new_exec_time
+        :param pending_orders: List of pending orders.
+        :param security: Security code of the order.
+        :param interval: Time interval for rescheduling.
+        :param current_time: Current time.
+        :param order: The order to be rescheduled.
+        :param action: Action type (e.g., "买入" or "卖出").
+        """
+        # 查找同一股票的所有订单
+        same_security_orders = [o for o in pending_orders if o.security == security]
 
-                # 重新添加到待执行列表
-                self.pending.append(p)
-                log.info(f"[拆单管理] 重新安排失败的{action}订单: {sec}, 新执行时间: {new_exec_time}")
+        if same_security_orders:
+            # 找到同一股票的最后一笔订单
+            last_order = max(same_security_orders, key=lambda o: o.exec_time)
+            new_exec_time = last_order.exec_time + interval
+        else:
+            # 没有其他订单，按默认延迟执行
+            new_exec_time = current_time + interval
+
+        # 更新执行时间
+        order.exec_time = new_exec_time
+
+        # 重新添加到待执行列表
+        pending_orders.append(order)
+        log.info(f"[拆单管理] 重新安排失败的{action}订单: {security}, 新执行时间: {new_exec_time}")
 
     def get_pending(self):
         """返回待执行订单 (security, shares, exec_time) 列表"""
