@@ -37,6 +37,9 @@ class PendingOrder:
         ctx = context or self.context
         try:
             val = self.shares if self.shares is not None else self.value
+            # 新增：防止目标市值为负数
+            if self.value is not None:
+                val = max(0, self.value)
             if self.sell_all:
                 val = 0 # 卖出全部持仓时，股数和市值都忽略，直接卖空
             res = self.func(ctx, self.security, val)
@@ -190,51 +193,44 @@ class SplitOrderManager:
         #     legs.pop()
         return legs
 
-    # def _schedule_shares(self, context, security, share_legs, sign):
-    #     """
-    #     先执行第一笔，后续按 interval 挂入 pending。
-    #     :param share_legs: list[int] 每笔绝对股数 (≥100)
-    #     :param sign: +1 买, -1 卖
-    #     """
-    #     now = context.current_dt
-    #     # 当前持仓股数
-    #     current_pos = self._get_current_position(context, security)
-    #     first_shares = share_legs[0] * sign + current_pos
-    #     action = "买入" if sign > 0 else "卖出"
-    #     log.info(f"[拆单管理] 执行第1笔{action} {security} 股数: {abs(first_shares)}")
-    #     mt.order_target_(context, security, first_shares)
-    #
-    #     for i, shares in enumerate(share_legs[1:], start=1):
-    #         exec_time = now + self.interval * i
-    #         po = PendingOrder(mt.order_target_, context, security, shares * sign, None, exec_time, i)
-    #         if i == len(share_legs) - 1 and sign < 0:
-    #             # 最后一笔卖出时，设置 sell_all=True
-    #             po.sell_all = True
-    #         self.pending.append(po)
-    #         log.info(f"[拆单管理] 安排第{i + 2}笔{action}: {security} 股数: {shares} 执行时间: {exec_time}")
-
     def _schedule_value(self, context, security, value_legs, sign, target_value):
         """
-        先执行第一笔，后续按 interval 挂入 pending。
-        :param value_legs: list[float] 每笔绝对市值 (≥100 股)
-        :param sign: +1 买, -1 卖
+        第一笔立即下单，后续进入pending队列。若第一笔失败，进入pending并顺延所有pending。
         """
         now = context.current_dt
-        # 当前持仓股数
+        price = self._get_price(context, security)
         current_pos = self._get_current_position(context, security)
-        first_value = value_legs[0] * sign + current_pos * self._get_price(context, security)
-        action = "买入" if sign > 0 else "卖出"
-        log.info(f"[拆单管理] 执行第1笔{action} {security} 市值: {abs(first_value)}")
-        mt.order_target_value_(context, security, first_value)
+        current_value = current_pos * price
 
-        for i, value in enumerate(value_legs[1:], start=1):
-            exec_time = now + self.interval * i
-            po = PendingOrder(mt.order_target_value_, context, security, None, value * sign, exec_time, i)
-            if i == len(value_legs) - 1 and target_value == 0:
-                # 最后一笔卖出时，设置 sell_all=True
-                po.sell_all = True
-            self.pending.append(po)
-            log.info(f"[拆单管理] 安排第{i + 1}笔{action}: {security} 市值: {value} 执行时间: {exec_time}")
+        accum = current_value
+        first_order_failed = False
+
+        for i, delta in enumerate(value_legs):
+            accum += delta * sign
+            if i == 0:
+                # 立即下第一笔
+                log.info(f"[拆单管理] 立即执行第1笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum}")
+                po = PendingOrder(mt.order_target_value_, context, security, None, accum, now, i)
+                res = po.execute(context)
+                if res is None or getattr(res, "amount", 0) == 0 or getattr(res, "status", "") == "canceled":
+                    # 如果失败，则丢入pending
+                    log.warn(f"[拆单管理] 第1笔{security}执行失败，加入pending队列并顺延所有pending")
+                    self.pending.append(po)
+                    first_order_failed = True
+                # 后续pending队列统一顺延
+            else:
+                exec_time = now + self.interval * i
+                po = PendingOrder(mt.order_target_value_, context, security, None, accum, exec_time, i)
+                if i == len(value_legs) - 1 and target_value == 0:
+                    po.sell_all = True
+                self.pending.append(po)
+                log.info(
+                    f"[拆单管理] 安排第{i + 1}笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum} 执行时间: {exec_time}")
+
+        if first_order_failed:
+            # 顺延所有同 security 的pending（包括刚加进去的第一笔）
+            self.reschedule_order(self.pending, security, self.interval, now, self.pending[-len(value_legs)],
+                                  "买入" if sign > 0 else "卖出")
 
     def place_order_value(self, context, security, target_value):
         """
@@ -369,15 +365,8 @@ class SplitOrderManager:
                 log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{p.idx + 1}单 股数 {abs(shares)}")
             elif p.value is not None:
                 action = "买入" if p.value > 0 else "卖出"
-                current_value = current_pos * self._get_price(context, sec)
-                target_value = current_value + p.value
-                if target_value < 0:
-                    log.warn(f"[拆单管理] 执行 {action} {sec} 市值 {abs(p.value)} 时，目标市值 {target_value} < 0")
-                    target_value = 0  # 全部卖出
-
-                # 更新 pending 订单的 value 为目标市值
-                p.value = target_value
-                log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{p.idx + 1}单 市值 {abs(p.value)}")
+                target_value = max(0, p.value)
+                log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{p.idx + 1}单 目标市值 {target_value}")
 
             try:
                 # 尝试执行订单
