@@ -3,4 +3,6 @@
         2019-01-02 14:50:00 - ERROR - security: 159985.XSHE 取到的最新价格非法: nan
         2019-01-02 14:50:00 - ERROR - 下单失败，初步检查下单数量为0: Order(security=159985.XSHE mode=OrderTargetValue: _value=6250.0 style=MarketOrderStyle: _limit_price=0.0 side=long margin=False entrust_time=None)
       ```
+    - PendingOrder shouldn't have other func than `order_target_value`
+    -
 

@@ -407,23 +407,37 @@ class SplitOrderManager:
         :param order: The order to be rescheduled.
         :param action: Action type (e.g., "买入" or "卖出").
         """
-        # 查找同一股票的所有订单
+        """
+        当有拆单失败时，把该 security 的所有 pending 顺序整体往后移动一位，并把失败订单放在第一个未完成订单的位置
+        """
+        # 取出该股票所有 pending，按 exec_time 排序
         same_security_orders = [o for o in pending_orders if o.security == security]
+        same_security_orders.sort(key=lambda o: o.exec_time)
 
-        if same_security_orders:
-            # 找到同一股票的最后一笔订单
-            last_order = max(same_security_orders, key=lambda o: o.exec_time)
-            new_exec_time = last_order.exec_time + interval
+        # 新 pending 队列（不包含当前 order）
+        others = [o for o in same_security_orders if o is not order]
+
+        if others:
+            # 新时间表：第一个pending slot 给失败订单，后面依次往后推
+            # 1. 失败订单执行时间设为第一个pending的原exec_time
+            old_times = [o.exec_time for o in others]
+            order.exec_time = old_times[0]
+            # 2. 依次让其它pending订单时间往后顺延（第二个时间给原第一个，第三个给原第二个...）
+            for i in range(len(others)):
+                if i + 1 < len(old_times):
+                    others[i].exec_time = old_times[i + 1]
+                else:
+                    others[i].exec_time = old_times[-1] + interval
+
         else:
-            # 没有其他订单，按默认延迟执行
-            new_exec_time = current_time + interval
+            # 没有别的订单，延后一个interval
+            order.exec_time = current_time + interval
 
-        # 更新执行时间
-        order.exec_time = new_exec_time
-
-        # 重新添加到待执行列表
+        # 放回 pending_orders（避免重复，加前先移除）
+        pending_orders[:] = [o for o in pending_orders if o.security != security or o is order]
         pending_orders.append(order)
-        log.info(f"[拆单管理] 重新安排失败的{action}订单: {security}, 新执行时间: {new_exec_time}")
+        pending_orders.extend(others)
+        log.info(f"[拆单管理] 重新安排失败的{action}订单: {security}, 新执行时间: {order.exec_time}")
 
     def get_pending(self):
         """返回待执行订单 (security, shares, exec_time) 列表"""
