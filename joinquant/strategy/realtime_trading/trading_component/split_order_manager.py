@@ -2,6 +2,7 @@ import datetime
 import math
 from kuanke.wizard import log
 import mysqltrade as mt
+from collections import defaultdict
 
 class PendingOrder:
     """
@@ -227,10 +228,6 @@ class SplitOrderManager:
                 log.info(
                     f"[拆单管理] 安排第{i + 1}笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum} 执行时间: {exec_time}")
 
-        if first_order_failed:
-            # 顺延所有同 security 的pending（包括刚加进去的第一笔）
-            self.reschedule_order(self.pending, security, self.interval, now, self.pending[-len(value_legs)],
-                                  "买入" if sign > 0 else "卖出")
 
     def place_order_value(self, context, security, target_value):
         """
@@ -341,49 +338,55 @@ class SplitOrderManager:
 
     def execute_pending(self, context):
         """
-        每个 Bar 调用，执行到期拆单
+        每轮只执行每只股票pending队列中的第一单，其它pending即使到时间也要等待前一单完成
         若订单执行失败，会重新安排在该股票最后一笔订单之后执行
         """
+        from collections import defaultdict
         now = context.current_dt
-        ready = [p for p in self.pending if p.exec_time <= now]
-        for p in ready:
-            self.pending.remove(p)  # 先移除，避免重复处理
+        pending_by_sec = defaultdict(list)
 
-            sec = p.security
-            shares = p.shares
-            action = "未知"
-            current_pos = self._get_current_position(context, sec)
-            if p.shares is not None:
-                action = "买入" if shares > 0 else "卖出"
-                target_shares = current_pos + shares
-                if target_shares < 0:
-                    log.warn(f"[拆单管理] 执行 {action} {sec} 股数 {abs(shares)} 时，目标持仓 {target_shares} 股 < 0")
-                    target_shares = 0  # 全部卖出
+        # 按 security 分组
+        for p in self.pending:
+            pending_by_sec[p.security].append(p)
 
-                # 更新 pending 订单的 shares 为目标持仓
-                p.shares = target_shares
-                log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{p.idx + 1}单 股数 {abs(shares)}")
-            elif p.value is not None:
-                action = "买入" if p.value > 0 else "卖出"
-                target_value = max(0, p.value)
-                log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{p.idx + 1}单 目标市值 {target_value}")
+        for sec, plist in pending_by_sec.items():
+            # 按 exec_time 升序，找最早的pending单
+            plist.sort(key=lambda o: o.exec_time)
+            first_order = plist[0]
+            # 只处理已到时间的pending单
+            if first_order.exec_time <= now:
+                self.pending.remove(first_order)
+                shares = first_order.shares
+                action = "未知"
+                current_pos = self._get_current_position(context, sec)
+                if first_order.shares is not None:
+                    action = "买入" if shares > 0 else "卖出"
+                    target_shares = current_pos + shares
+                    if target_shares < 0:
+                        log.warn(
+                            f"[拆单管理] 执行 {action} {sec} 股数 {abs(shares)} 时，目标持仓 {target_shares} 股 < 0")
+                        target_shares = 0
+                    first_order.shares = target_shares
+                    log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 股数 {abs(shares)}")
+                elif first_order.value is not None:
+                    action = "买入" if first_order.value > 0 else "卖出"
+                    target_value = max(0, first_order.value)
+                    log.info(
+                        f"[拆单管理] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 目标市值 {target_value}")
 
-            try:
-                # 尝试执行订单
-                res = p.execute(context)
+                try:
+                    # 尝试执行订单
+                    res = first_order.execute(context)
 
-                # debug security
-                # if sec == "600159.XSHG":
-                #     log.info(f"[拆单管理][debug] 执行 {action} {sec} 订单结果: {res}")
-
-                if res is None \
-                        or res.amount == 0 \
-                        or res.status == 'canceled' \
-                        or res.filled == 0:
-                    log.warn(f"[拆单管理] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res}")
-                    self.reschedule_order(self.pending, sec, self.interval, now, p, action)
-            except Exception as e:
-                self.reschedule_order(self.pending, sec, self.interval, now, p, action)
+                    if res is None \
+                            or getattr(res, "amount", 0) == 0 \
+                            or getattr(res, "status", "") == 'canceled' \
+                            or getattr(res, "filled", 0) == 0:
+                        log.warn(f"[拆单管理] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res}")
+                        self.reschedule_order(self.pending, sec, self.interval, now, first_order, action)
+                except Exception as e:
+                    self.reschedule_order(self.pending, sec, self.interval, now, first_order, action)
+            # 否则（未到时间），本轮不处理
 
     def reschedule_order(self, pending_orders, security, interval, current_time, order, action):
         """
