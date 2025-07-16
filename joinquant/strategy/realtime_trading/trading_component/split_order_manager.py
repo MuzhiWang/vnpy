@@ -8,7 +8,18 @@ class PendingOrder:
     """
     表示一个待执行的拆分订单。
     """
-    def __init__(self, func, context, security, shares=None, value=None, exec_time=None, idx=None, sell_all=False):
+    def __init__(
+            self,
+            func,
+            context,
+            security,
+            shares=None,
+            value=None,
+            exec_time=None,
+            idx=None,
+            sell_all=False,
+            origin=None,
+    ):
         """
         :param func: 下单函数，按股数买/卖 (签名 func(context, security, shares))
         :param context: 策略上下文
@@ -25,13 +36,14 @@ class PendingOrder:
         self.executed_time = None  # 记录实际执行时间
         self.idx = idx  # 可选，订单索引，用于跟踪或调试
         self.sell_all = sell_all  # 是否卖出全部持仓，若为 True 则 shares & value 被忽略
+        self.origin = origin or {}  # 新增，默认空 dict
 
     def execute(self, context=None):
         if self.shares is None and self.value is None:
-            log.error(f"[PendingOrder] 执行订单失败: {self.security} 股数和市值都未指定")
+            log.error(f"[PendingOrder] 执行订单失败: {self.security} 股数和市值都未指定 | 原始订单: {self.origin}")
             return
         if self.exec_time is None:
-            log.error(f"[PendingOrder] 执行订单失败: {self.security} 执行时间未指定")
+            log.error(f"[PendingOrder] 执行订单失败: {self.security} 执行时间未指定 | 原始订单: {self.origin}")
             return
 
         """执行 pending 订单"""
@@ -46,12 +58,12 @@ class PendingOrder:
             res = self.func(ctx, self.security, val)
             self.executed_time = ctx.current_dt
             if res is not None:
-                log.info(f"[PendingOrder] 执行订单: {self.security}, 第{self.idx + 1} 股数: {self.shares} 市值: {self.value}, 结果: {res}")
+                log.info(f"[PendingOrder] 执行订单: {self.security}, 第{self.idx + 1} 股数: {self.shares} 市值: {self.value}, 结果: {res} | 原始订单: {self.origin}")
             else:
-                log.warn(f"[PendingOrder] 执行订单 返回 None: {self.security} 股数: {self.shares} 市值: {self.value}")
+                log.warn(f"[PendingOrder] 执行订单 返回 None: {self.security} 股数: {self.shares} 市值: {self.value} | 原始订单: {self.origin}")
             return res
         except Exception as e:
-            log.error(f"[PendingOrder] 执行订单失败: {self.security} 股数: {self.shares} 市值: {self.value}, 错误: {e}")
+            log.error(f"[PendingOrder] 执行订单失败: {self.security} 股数: {self.shares} 市值: {self.value}, 错误: {e} | 原始订单: {self.origin}")
             raise e  # 重新抛出异常以便上层捕获
 
 
@@ -175,7 +187,7 @@ class SplitOrderManager:
             legs.pop()
         return legs
 
-    def _compute_value_slices(self, abs_value):
+    def _compute_value_slices(self, abs_value) -> list:
         """
         按绝对市值拆分成多个 leg，保证每笔 ≤ max_value 且 ≥100 股。
         """
@@ -194,7 +206,7 @@ class SplitOrderManager:
         #     legs.pop()
         return legs
 
-    def _schedule_value(self, context, security, value_legs, sign, target_value):
+    def _schedule_value(self, context, security, value_legs, sign, target_value, origin=None):
         """
         第一笔立即下单，后续进入pending队列。若第一笔失败，进入pending并顺延所有pending。
         """
@@ -204,14 +216,13 @@ class SplitOrderManager:
         current_value = current_pos * price
 
         accum = current_value
-        first_order_failed = False
 
         for i, delta in enumerate(value_legs):
             accum += delta * sign
             if i == 0:
                 # 立即下第一笔
                 log.info(f"[拆单管理] 立即执行第1笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum}")
-                po = PendingOrder(mt.order_target_value_, context, security, None, accum, now, i)
+                po = PendingOrder(mt.order_target_value_, context, security, None, accum, now, i, origin=origin)
                 res = po.execute(context)
                 if res is None or getattr(res, "amount", 0) == 0 or getattr(res, "status", "") == "canceled":
                     # 如果失败，则丢入pending
@@ -270,7 +281,15 @@ class SplitOrderManager:
         log.info(f"[拆单管理] 拆分 {security} {action} 总市值 {abs_value}元 分 {len(value_slices)} 笔: {value_slices}")
 
         sign = 1 if delta_value > 0 else -1
-        self._schedule_value(context, security, value_slices, sign, target_value)
+
+        origin_info = {
+            "order_time": context.current_dt,
+            "original_target_value": target_value,
+            "split_count": len(value_slices),
+            "action": action,
+            "security": security,
+        }
+        self._schedule_value(context, security, value_slices, sign, target_value, origin=origin_info)
 
     def order_target_value_(self, context, security, target_value):
         """与 mysql_trade order_target_value_ 同名接口，按市值拆分下单"""
@@ -364,15 +383,15 @@ class SplitOrderManager:
                     target_shares = current_pos + shares
                     if target_shares < 0:
                         log.warn(
-                            f"[拆单管理] 执行 {action} {sec} 股数 {abs(shares)} 时，目标持仓 {target_shares} 股 < 0")
+                            f"[拆单管理] 执行 {action} {sec} 股数 {abs(shares)} 时，目标持仓 {target_shares} 股 < 0 | 原始订单: {first_order.origin}")
                         target_shares = 0
                     first_order.shares = target_shares
-                    log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 股数 {abs(shares)}")
+                    log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 股数 {abs(shares)} | 原始订单: {first_order.origin}")
                 elif first_order.value is not None:
                     action = "买入" if first_order.value > 0 else "卖出"
                     target_value = max(0, first_order.value)
                     log.info(
-                        f"[拆单管理] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 目标市值 {target_value}")
+                        f"[拆单管理] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 目标市值 {target_value} | 原始订单: {first_order.origin}")
 
                 try:
                     # 尝试执行订单
@@ -382,7 +401,7 @@ class SplitOrderManager:
                             or getattr(res, "amount", 0) == 0 \
                             or getattr(res, "status", "") == 'canceled' \
                             or getattr(res, "filled", 0) == 0:
-                        log.warn(f"[拆单管理] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res}")
+                        log.warn(f"[拆单管理] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res} | 原始订单: {first_order.origin}")
                         self.reschedule_order(self.pending, sec, self.interval, now, first_order, action)
                 except Exception as e:
                     self.reschedule_order(self.pending, sec, self.interval, now, first_order, action)
@@ -429,7 +448,7 @@ class SplitOrderManager:
         pending_orders[:] = [o for o in pending_orders if o.security != security or o is order]
         pending_orders.append(order)
         pending_orders.extend(others)
-        log.info(f"[拆单管理] 重新安排失败的{action}订单: {security}, 新执行时间: {order.exec_time}")
+        log.info(f"[拆单管理] 重新安排失败的{action}订单: {security}, 新执行时间: {order.exec_time} | 原始订单: {order.origin}")
 
     def get_pending(self):
         """返回待执行订单 (security, shares, exec_time) 列表"""
