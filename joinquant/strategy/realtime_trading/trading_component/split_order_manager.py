@@ -233,6 +233,120 @@ class SplitOrderManager:
 
         return True
 
+    def _has_pending_sell_all_order(self, security) -> bool:
+        """
+        检查指定证券是否已有待执行的卖出全部持仓订单
+        :param security: 证券代码
+        :return: True 如果存在卖出全部持仓的待执行订单
+        """
+        for order in self.pending:
+            if order.security == security and order.sell_all:
+                return True
+        return False
+
+    def _get_max_pending_target_value(self, security) -> int:
+        """
+        获取指定证券的最大待执行目标市值
+        :param security: 证券代码
+        :return: 最大目标市值，如果没有待执行订单则返回0
+        """
+        max_value = 0
+        for order in self.pending:
+            if order.security == security and order.value is not None:
+                max_value = max(max_value, order.value)
+        return max_value
+
+    def _check_buy_order_validity(self, context, security, target_value) -> bool:
+        """
+        检查买入订单的有效性，防止重复买入
+        :param context: 策略上下文
+        :param security: 证券代码
+        :param target_value: 目标市值
+        :return: True 如果订单有效，False 如果应该阻止
+        """
+        current_pos = self._get_current_position(context, security)
+        price = self._get_price(context, security)
+        current_value = current_pos * price
+
+        # 只检查买入订单（目标市值 > 当前市值）
+        if target_value <= current_value:
+            return True
+
+        # 检查是否有更大的待执行买入订单
+        max_pending_value = self._get_max_pending_target_value(security)
+
+        if max_pending_value >= target_value:
+            log.warn(f"[PendingOrder] 阻止 {security} 买入订单: 已存在更大的待执行买入订单 "
+                     f"(待执行: {max_pending_value:.2f} 元 >= 新订单: {target_value:.2f} 元)")
+            return False
+
+        return True
+
+    def _check_sell_order_validity(self, context, security, target_value):
+        """
+        检查卖出订单的有效性，防止过度卖出
+        :param context: 策略上下文
+        :param security: 证券代码
+        :param target_value: 目标市值
+        :return: True 如果订单有效，False 如果应该阻止
+        """
+        # 🔥 NEW: 如果已有卖出全部持仓的订单，拒绝新的卖出订单
+        if self._has_pending_sell_all_order(security):
+            log.warn(f"[PendingOrder] 阻止 {security} 卖出订单: 已存在卖出全部持仓的待执行订单")
+            return False
+
+        # 计算当前持仓和已计划卖出的数量
+        current_pos = self._get_current_position(context, security)
+        price = self._get_price(context, security)
+        current_value = current_pos * price
+
+        # 🔥 NEW: 计算已计划卖出的总市值
+        planned_sell_value = 0
+        for order in self.pending:
+            if order.security == security:
+                if order.sell_all:
+                    planned_sell_value = current_value  # 如果有sell_all，则已计划卖出全部
+                    break
+                elif order.value is not None and order.value < current_value:
+                    # 这是一个减仓订单（目标市值 < 当前市值）
+                    sell_amount = current_value - order.value
+                    planned_sell_value += sell_amount
+
+        # 🔥 NEW: 检查新订单是否会导致过度卖出
+        if target_value < current_value:  # 这是一个卖出订单
+            additional_sell = current_value - target_value
+            total_planned_sell = planned_sell_value + additional_sell
+
+            if total_planned_sell > current_value:
+                log.warn(f"[PendingOrder] 阻止 {security} 卖出订单: 总计划卖出 {total_planned_sell:.2f} 元 "
+                         f"> 当前持仓 {current_value:.2f} 元")
+                return False
+
+        return True
+
+    def _check_order_validity(self, context, security, target_value):
+        """
+        检查订单的有效性，包括买入和卖出订单的验证
+        :param context: 策略上下文
+        :param security: 证券代码
+        :param target_value: 目标市值
+        :return: True 如果订单有效，False 如果应该阻止
+        """
+        current_pos = self._get_current_position(context, security)
+        price = self._get_price(context, security)
+        current_value = current_pos * price
+
+        if target_value > current_value:
+            # 买入订单检查
+            return self._check_buy_order_validity(context, security, target_value)
+        elif target_value < current_value:
+            # 卖出订单检查
+            return self._check_sell_order_validity(context, security, target_value)
+        else:
+            # 目标市值等于当前市值，无需操作
+            log.info(f"[PendingOrder] {security} 目标市值 {target_value:.2f} 元等于当前市值，无需操作")
+            return False
+
     def _schedule_value(self, context, security, value_legs, sign, target_value, origin=None):
         """
         第一笔立即下单，后续进入pending队列。若第一笔失败，进入pending并顺延所有pending。
@@ -298,6 +412,11 @@ class SplitOrderManager:
         current_pos = self._get_current_position(context, security)
         current_value = current_pos * price
         log.info(f"[PendingOrder] 当前 {security} 持仓: {current_pos}, 市值: {current_value} 元, 目标市值: {target_value} 元")
+
+        # 检查订单的有效性（买入和卖出）
+        if not self._check_order_validity(context, security, target_value):
+            log.error(f"[PendingOrder] 订单被阻止: {security} 目标市值 {target_value} 元")
+            return
 
         # 需调整市值 (正买, 负卖)
         delta_value = target_value - current_value
