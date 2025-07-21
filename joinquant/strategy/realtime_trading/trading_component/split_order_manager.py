@@ -206,6 +206,33 @@ class SplitOrderManager:
         #     legs.pop()
         return legs
 
+    def _is_order_successful(self, order_result):
+        """
+        检查订单是否执行成功
+
+        :param order_result: 订单执行结果
+        :return: True 如果订单成功执行，False 如果失败
+        """
+        if order_result is None:
+            return False
+
+        # 检查订单是否有实际成交量
+        filled = getattr(order_result, "filled", 0)
+        if filled == 0:
+            return False
+
+        # 检查订单状态
+        status = str(getattr(order_result, "status", ""))
+        if status == "canceled":
+            return False
+
+        # 检查订单金额（可选，作为额外保护）
+        amount = getattr(order_result, "amount", 0)
+        if amount == 0:
+            return False
+
+        return True
+
     def _schedule_value(self, context, security, value_legs, sign, target_value, origin=None):
         """
         第一笔立即下单，后续进入pending队列。若第一笔失败，进入pending并顺延所有pending。
@@ -216,28 +243,37 @@ class SplitOrderManager:
         current_value = current_pos * price
 
         accum = current_value
+        first_order_failed = False
 
         for i, delta in enumerate(value_legs):
             accum += delta * sign
             if i == 0:
                 # 立即下第一笔
-                log.info(f"[拆单管理] 立即执行第1笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum}")
+                log.info(f"[PendingOrder] 立即执行第1笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum}")
                 po = PendingOrder(mt.order_target_value_, context, security, None, accum, now, i, origin=origin)
                 res = po.execute(context)
-                if res is None or getattr(res, "amount", 0) == 0 or getattr(res, "status", "") == "canceled":
+                if not self._is_order_successful(res):
                     # 如果失败，则丢入pending
-                    log.warn(f"[拆单管理] 第1笔{security}执行失败，加入pending队列并顺延所有pending")
-                    self.pending.append(po)
+                    log.warn(f"[PendingOrder] 第1笔{security}执行失败，加入pending队列并顺延所有pending")
                     first_order_failed = True
-                # 后续pending队列统一顺延
+                    # 第一笔失败时，重新安排到第一个时间slot
+                    po.exec_time = now + self.interval
+                    self.pending.append(po)
+                    log.info(f"[PendingOrder] 第1笔失败订单已重新安排到: {po.exec_time}")
+                else:
+                    log.info(f"[PendingOrder] 第1笔{security}执行成功")
             else:
-                exec_time = now + self.interval * i
-                po = PendingOrder(mt.order_target_value_, context, security, None, accum, exec_time, i)
+                # 如果第一笔失败，所有后续订单都要往后顺延一个时间slot
+                if first_order_failed:
+                    exec_time = now + self.interval * (i + 1)
+                else:
+                    exec_time = now + self.interval * i
+                po = PendingOrder(mt.order_target_value_, context, security, None, accum, exec_time, i, origin=origin)
                 if i == len(value_legs) - 1 and target_value == 0:
                     po.sell_all = True
                 self.pending.append(po)
                 log.info(
-                    f"[拆单管理] 安排第{i + 1}笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum} 执行时间: {exec_time}")
+                    f"[PendingOrder] 安排第{i + 1}笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum} 执行时间: {exec_time}")
 
 
     def place_order_value(self, context, security, target_value):
@@ -249,36 +285,36 @@ class SplitOrderManager:
         """
         price = self._get_price(context, security)
         if price is None or price <= 0:
-            log.error(f"[拆单管理] 无法获取 {security} 最新价格，跳过")
+            log.error(f"[PendingOrder] 无法获取 {security} 最新价格，跳过")
             return
 
         # # 目标持仓股数 (100 股单位)
         # target_shares = int((target_value / price) // 100) * 100
         # if target_shares < 100 and target_value > 0:
-        #     log.warn(f"[拆单管理] 金额 {target_value} 对应 <100 股({target_shares}股)，跳过 {security}")
+        #     log.warn(f"[PendingOrder] 金额 {target_value} 对应 <100 股({target_shares}股)，跳过 {security}")
         #     return
 
         # 当前持仓股数
         current_pos = self._get_current_position(context, security)
         current_value = current_pos * price
-        log.info(f"[拆单管理] 当前 {security} 持仓: {current_pos}, 市值: {current_value} 元, 目标市值: {target_value} 元")
+        log.info(f"[PendingOrder] 当前 {security} 持仓: {current_pos}, 市值: {current_value} 元, 目标市值: {target_value} 元")
 
         # 需调整市值 (正买, 负卖)
         delta_value = target_value - current_value
         # if abs(delta_value) < price * 100:
-        #     log.warn(f"[拆单管理] {security} 目标市值 {target_value}元, 当前市值 {current_value}元, 差额 <100股市值, 跳过")
+        #     log.warn(f"[PendingOrder] {security} 目标市值 {target_value}元, 当前市值 {current_value}元, 差额 <100股市值, 跳过")
         #     return
 
         # 若市值 ≤ 阈值, 直接调整持仓到目标
         if abs(delta_value) <= self.split_threshold:
-            log.info(f"[拆单管理] 直接调整持仓 {security} 到目标市值 {target_value}元")
+            log.info(f"[PendingOrder] 直接调整持仓 {security} 到目标市值 {target_value}元")
             return mt.order_target_value_(context, security, target_value)
 
         # 拆单：计算市值拆分
         abs_value = abs(delta_value)
         value_slices = self._compute_value_slices(abs_value)
         action = "买入" if delta_value > 0 else "卖出"
-        log.info(f"[拆单管理] 拆分 {security} {action} 总市值 {abs_value}元 分 {len(value_slices)} 笔: {value_slices}")
+        log.info(f"[PendingOrder] 拆分 {security} {action} 总市值 {abs_value}元 分 {len(value_slices)} 笔: {value_slices}")
 
         sign = 1 if delta_value > 0 else -1
 
@@ -293,7 +329,7 @@ class SplitOrderManager:
 
     def order_target_value_(self, context, security, target_value):
         """与 mysql_trade order_target_value_ 同名接口，按市值拆分下单"""
-        log.info(f"[拆单管理] 请求 {security} 目标市值 {target_value} 元")
+        log.info(f"[PendingOrder] 请求 {security} 目标市值 {target_value} 元")
         return self.place_order_value(context, security, target_value)
 
     def order_value_(self, context, security, amount):
@@ -303,11 +339,11 @@ class SplitOrderManager:
         :param security: 证券代码
         :param amount: 交易金额，正数买入，负数卖出
         """
-        log.info(f"[拆单管理] 请求 {security} {'买入' if amount > 0 else '卖出'}市值 {abs(amount)} 元")
+        log.info(f"[PendingOrder] 请求 {security} {'买入' if amount > 0 else '卖出'}市值 {abs(amount)} 元")
 
         price = self._get_price(context, security)
         if price is None or price <= 0:
-            log.error(f"[拆单管理] 无法获取 {security} 最新价格，跳过")
+            log.error(f"[PendingOrder] 无法获取 {security} 最新价格，跳过")
             return
 
         # 当前持仓市值
@@ -321,10 +357,10 @@ class SplitOrderManager:
 
     def order_target_(self, context, security, shares):
         """与 mysql_trade order_target_ 同名接口，按目标持仓拆单下单"""
-        log.info(f"[拆单管理] 请求 {security} 目标持仓 {shares} 股")
+        log.info(f"[PendingOrder] 请求 {security} 目标持仓 {shares} 股")
         price = self._get_price(context, security)
         if price is None or price <= 0:
-            log.error(f"[拆单管理] 无法获取 {security} 最新价格，跳过")
+            log.error(f"[PendingOrder] 无法获取 {security} 最新价格，跳过")
             return
         # 目标持仓股数
         target_shares = shares
@@ -335,11 +371,11 @@ class SplitOrderManager:
     #     """与 mysql_trade order_ 同名接口，按需交易股数拆单下单"""
     #     price = self._get_price(context, security)
     #     if price is None or price <= 0:
-    #         log.error(f"[拆单管理] 无法获取 {security} 最新价格，跳过")
+    #         log.error(f"[PendingOrder] 无法获取 {security} 最新价格，跳过")
     #         return
     #     abs_shares = abs(shares)
     #     if abs_shares < 100:
-    #         log.info(f"[拆单管理] 请求交易 {abs_shares} 股 <100 股，跳过 {security}")
+    #         log.info(f"[PendingOrder] 请求交易 {abs_shares} 股 <100 股，跳过 {security}")
     #         return
     #     # 需买或需卖股数 = shares (正买, 负卖)
     #     sign = 1 if shares > 0 else -1
@@ -348,11 +384,11 @@ class SplitOrderManager:
     #     max_leg_shares = int((self.max_value / price) // 100) * 100
     #     if max_leg_shares < 100:
     #         # 无法拆单时，直接一次性下单
-    #         log.info(f"[拆单管理] max_leg({self.max_value}元) 对应 <100 股，直接下单 {abs_shares} 股 {security}")
+    #         log.info(f"[PendingOrder] max_leg({self.max_value}元) 对应 <100 股，直接下单 {abs_shares} 股 {security}")
     #         return mt.order(context, security, shares)
     #     share_legs = self._compute_share_slices(abs_shares, max_leg_shares)
     #     action = "买入" if shares > 0 else "卖出"
-    #     log.info(f"[拆单管理] 拆分 {security} {action} 总股数 {abs_shares} 分 {len(share_legs)} 笔: {share_legs}")
+    #     log.info(f"[PendingOrder] 拆分 {security} {action} 总股数 {abs_shares} 分 {len(share_legs)} 笔: {share_legs}")
     #     self._schedule_shares(context, security, share_legs, sign)
 
     def execute_pending(self, context):
@@ -383,27 +419,33 @@ class SplitOrderManager:
                     target_shares = current_pos + shares
                     if target_shares < 0:
                         log.warn(
-                            f"[拆单管理] 执行 {action} {sec} 股数 {abs(shares)} 时，目标持仓 {target_shares} 股 < 0 | 原始订单: {first_order.origin}")
+                            f"[PendingOrder] 执行 {action} {sec} 股数 {abs(shares)} 时，目标持仓 {target_shares} 股 < 0 | 原始订单: {first_order.origin}")
                         target_shares = 0
                     first_order.shares = target_shares
-                    log.info(f"[拆单管理] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 股数 {abs(shares)} | 原始订单: {first_order.origin}")
+                    log.info(f"[PendingOrder] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 股数 {abs(shares)} | 原始订单: {first_order.origin}")
                 elif first_order.value is not None:
-                    action = "买入" if first_order.value > 0 else "卖出"
+                    # 按市值下单 - 这是主要的订单类型
+                    current_pos = self._get_current_position(context, sec)
+                    current_price = self._get_price(context, sec)
+
+                    current_value = current_pos * current_price
+                    target_value = first_order.value
+
+                    action = "买入" if target_value > current_value else "卖出"
+
                     target_value = max(0, first_order.value)
                     log.info(
-                        f"[拆单管理] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 目标市值 {target_value} | 原始订单: {first_order.origin}")
+                        f"[PendingOrder] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 目标市值 {target_value} | 原始订单: {first_order.origin}")
 
                 try:
                     # 尝试执行订单
                     res = first_order.execute(context)
 
-                    if res is None \
-                            or getattr(res, "amount", 0) == 0 \
-                            or getattr(res, "status", "") == 'canceled' \
-                            or getattr(res, "filled", 0) == 0:
-                        log.warn(f"[拆单管理] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res} | 原始订单: {first_order.origin}")
+                    if not self._is_order_successful(res):
+                        log.warn(f"[PendingOrder] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res} | 原始订单: {first_order.origin}")
                         self.reschedule_order(self.pending, sec, self.interval, now, first_order, action)
                 except Exception as e:
+                    log.error(f"[PendingOrder] 执行 {action} {sec} 订单异常: {e} | 原始订单: {first_order.origin}")
                     self.reschedule_order(self.pending, sec, self.interval, now, first_order, action)
             # 否则（未到时间），本轮不处理
 
@@ -448,7 +490,7 @@ class SplitOrderManager:
         pending_orders[:] = [o for o in pending_orders if o.security != security or o is order]
         pending_orders.append(order)
         pending_orders.extend(others)
-        log.info(f"[拆单管理] 重新安排失败的{action}订单: {security}, 新执行时间: {order.exec_time} | 原始订单: {order.origin}")
+        log.info(f"[PendingOrder] 重新安排失败的{action}订单: {security}, 新执行时间: {order.exec_time} | 原始订单: {order.origin}")
 
     def get_pending(self):
         """返回待执行订单 (security, shares, exec_time) 列表"""
@@ -479,7 +521,7 @@ class SplitOrderManager:
             price = self._get_price(context, security)
 
             if price is None or price <= 0:
-                log.error(f"[拆单管理] get_available_balance: 无法获取 {security} 价格，忽略该笔待处理订单")
+                log.error(f"[PendingOrder] get_available_balance: 无法获取 {security} 价格，忽略该笔待处理订单")
                 continue
 
             if pending_order.value is not None:
@@ -522,7 +564,7 @@ class SplitOrderManager:
                     balance.pending_sell += sell_value
                     balance.pending_sell_securities[security] = current_pos  # 全部卖出
 
-        log.info(f"[拆单管理] 余额计算: 当前现金={balance.current_cash:.2f}, "
+        log.info(f"[PendingOrder] 余额计算: 当前现金={balance.current_cash:.2f}, "
                  f"待买入={balance.pending_buy:.2f}, "
                  f"待卖出={balance.pending_sell:.2f}, "
                  f"可用={balance.available_cash:.2f}")
