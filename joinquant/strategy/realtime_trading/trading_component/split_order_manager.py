@@ -3,11 +3,75 @@ import math
 from kuanke.wizard import log
 import mysqltrade as mt
 from collections import defaultdict
+from enum import Enum
+from typing import Optional, Dict, Any, Callable
+
+
+class OrderExecutionPolicy(Enum):
+    """订单执行策略枚举"""
+    DEFAULT = "default"  # 默认行为，跟随pending队列，无特殊逻辑
+    CANCEL_NEXT_DAY = "cancel_next_day"  # 次日取消
+    CANCEL_AFTER_TIME = "cancel_after_time"  # 指定时间后取消
+    CUSTOM_CONDITION = "custom_condition"  # 自定义条件
+
+
+class OrderExecutionConfig:
+    """订单执行配置类"""
+
+    def __init__(
+            self,
+            policy: OrderExecutionPolicy = OrderExecutionPolicy.DEFAULT,
+            cancel_after_hours: Optional[int] = None,
+            cancel_after_datetime: Optional[datetime.datetime] = None,
+            buy_order_policy: Optional[OrderExecutionPolicy] = None,
+            sell_order_policy: Optional[OrderExecutionPolicy] = None,
+            custom_cancel_condition: Optional[Callable] = None,
+            apply_to_buy_orders: bool = True,
+            apply_to_sell_orders: bool = True
+    ):
+        """
+        初始化订单执行配置
+
+        :param policy: 基础执行策略
+        :param cancel_after_hours: 多少小时后取消
+        :param cancel_after_datetime: 指定时间后取消
+        :param buy_order_policy: 买入订单特定策略
+        :param sell_order_policy: 卖出订单特定策略
+        :param custom_cancel_condition: 自定义取消条件函数
+        :param apply_to_buy_orders: 是否应用于买入订单
+        :param apply_to_sell_orders: 是否应用于卖出订单
+        """
+        self.policy = policy
+        self.cancel_after_hours = cancel_after_hours
+        self.cancel_after_datetime = cancel_after_datetime
+        self.buy_order_policy = buy_order_policy
+        self.sell_order_policy = sell_order_policy
+        self.custom_cancel_condition = custom_cancel_condition
+        self.apply_to_buy_orders = apply_to_buy_orders
+        self.apply_to_sell_orders = apply_to_sell_orders
+
+    def get_effective_policy(self, is_buy_order: bool) -> OrderExecutionPolicy:
+        """获取对特定订单类型生效的策略"""
+        if is_buy_order and self.buy_order_policy is not None:
+            return self.buy_order_policy
+        elif not is_buy_order and self.sell_order_policy is not None:
+            return self.sell_order_policy
+        else:
+            return self.policy
+
+    def should_apply_to_order(self, is_buy_order: bool) -> bool:
+        """判断配置是否适用于指定类型的订单"""
+        if is_buy_order:
+            return self.apply_to_buy_orders
+        else:
+            return self.apply_to_sell_orders
+
 
 class PendingOrder:
     """
     表示一个待执行的拆分订单。
     """
+
     def __init__(
             self,
             func,
@@ -19,24 +83,84 @@ class PendingOrder:
             idx=None,
             sell_all=False,
             origin=None,
+            execution_config: Optional[OrderExecutionConfig] = None,
+            is_buy_order: Optional[bool] = None,  # 新增：明确指定是否为买入订单
     ):
         """
         :param func: 下单函数，按股数买/卖 (签名 func(context, security, shares))
         :param context: 策略上下文
         :param security: 证券代码
         :param shares: 股数 (正数=买入, 负数=卖出)
+        :param value: 市值
         :param exec_time: 执行时间
+        :param idx: 订单索引
+        :param sell_all: 是否卖出全部持仓
+        :param origin: 原始订单信息
+        :param execution_config: 执行配置
+        :param is_buy_order: 明确指定是否为买入订单（避免运行时计算）
         """
         self.func = func
         self.context = context
         self.security = security
-        self.shares = shares # 绝对股数 (正数=买入, 负数=卖出)
+        self.shares = shares  # 绝对股数 (正数=买入, 负数=卖出)
         self.value = value  # 可选，订单市值
         self.exec_time = exec_time
         self.executed_time = None  # 记录实际执行时间
         self.idx = idx  # 可选，订单索引，用于跟踪或调试
         self.sell_all = sell_all  # 是否卖出全部持仓，若为 True 则 shares & value 被忽略
-        self.origin = origin or {}  # 新增，默认空 dict
+        self.origin = origin or {}  # 原始订单信息
+
+        # 执行配置相关
+        self.execution_config = execution_config or OrderExecutionConfig()
+        self.original_exec_date = exec_time.date() if exec_time else None
+        self.original_exec_time = exec_time
+        self.first_attempt_time = exec_time
+
+        # 买入订单判断 - 必须明确确定
+        if is_buy_order is not None:
+            self.is_buy_order = is_buy_order
+        elif self.shares is not None:
+            self.is_buy_order = self.shares > 0
+        elif self.sell_all:
+            self.is_buy_order = False  # 卖出全部持仓肯定是卖出订单
+        else:
+            # 对于基于市值的订单，必须明确指定买卖方向
+            raise ValueError(f"[PendingOrder] 无法确定订单 {security} 的买卖方向，必须明确指定 is_buy_order 参数")
+
+    def should_cancel_order(self, context) -> tuple[bool, str]:
+        """
+        检查订单是否应该被取消
+        :param context: 策略上下文
+        :return: (是否取消, 取消原因)
+        """
+        if not self.execution_config.should_apply_to_order(self.is_buy_order):
+            return False, ""
+
+        current_time = context.current_dt
+        current_date = current_time.date()
+
+        effective_policy = self.execution_config.get_effective_policy(self.is_buy_order)
+
+        # 根据不同策略判断是否取消
+        if effective_policy == OrderExecutionPolicy.DEFAULT:
+            return False, ""
+
+        elif effective_policy == OrderExecutionPolicy.CANCEL_NEXT_DAY:
+            if self.original_exec_date and current_date > self.original_exec_date:
+                return True, f"次日取消策略: 原始日期 {self.original_exec_date}, 当前日期 {current_date}"
+
+        elif effective_policy == OrderExecutionPolicy.CANCEL_AFTER_TIME:
+            if self.execution_config.cancel_after_hours is not None:
+                if (self.first_attempt_time and
+                        current_time >= self.first_attempt_time + datetime.timedelta(
+                            hours=self.execution_config.cancel_after_hours)):
+                    return True, f"超过指定时间: {self.execution_config.cancel_after_hours}小时"
+
+            if (self.execution_config.cancel_after_datetime is not None and
+                    current_time >= self.execution_config.cancel_after_datetime):
+                return True, f"超过指定时间点: {self.execution_config.cancel_after_datetime}"
+
+        return False, ""
 
     def execute(self, context=None):
         if self.shares is None and self.value is None:
@@ -54,16 +178,19 @@ class PendingOrder:
             if self.value is not None:
                 val = max(0, self.value)
             if self.sell_all:
-                val = 0 # 卖出全部持仓时，股数和市值都忽略，直接卖空
+                val = 0  # 卖出全部持仓时，股数和市值都忽略，直接卖空
             res = self.func(ctx, self.security, val)
             self.executed_time = ctx.current_dt
             if res is not None:
-                log.info(f"[PendingOrder] 执行订单: {self.security}, 第{self.idx + 1} 股数: {self.shares} 市值: {self.value}, 结果: {res} | 原始订单: {self.origin}")
+                log.info(
+                    f"[PendingOrder] 执行订单: {self.security}, 第{self.idx + 1} 股数: {self.shares} 市值: {self.value}, 结果: {res} | 原始订单: {self.origin}")
             else:
-                log.warn(f"[PendingOrder] 执行订单 返回 None: {self.security} 股数: {self.shares} 市值: {self.value} | 原始订单: {self.origin}")
+                log.warn(
+                    f"[PendingOrder] 执行订单 返回 None: {self.security} 股数: {self.shares} 市值: {self.value} | 原始订单: {self.origin}")
             return res
         except Exception as e:
-            log.error(f"[PendingOrder] 执行订单失败: {self.security} 股数: {self.shares} 市值: {self.value}, 错误: {e} | 原始订单: {self.origin}")
+            log.error(
+                f"[PendingOrder] 执行订单失败: {self.security} 股数: {self.shares} 市值: {self.value}, 错误: {e} | 原始订单: {self.origin}")
             raise e  # 重新抛出异常以便上层捕获
 
 
@@ -81,9 +208,8 @@ class Balance:
         self.pending_sell = pending_sell  # Expected cash from pending sell orders
 
         # 持仓信息
-        self.positions = {}               # 当前持仓 {security: amount}
-        self.pending_sell_securities = {} # 待卖出证券 {security: amount}
-
+        self.positions = {}  # 当前持仓 {security: amount}
+        self.pending_sell_securities = {}  # 待卖出证券 {security: amount}
 
     @property
     def available_cash(self):
@@ -137,13 +263,16 @@ class SplitOrderManager:
       - order_target_(context, security, shares) (按目标持仓拆单)
       - order_(context, security, shares)        (按需交易股数拆单)
     """
-    def __init__(self, get_current_data_func, split_threshold=50000, max_value=50000, max_splits=4, interval_minutes=4):
+
+    def __init__(self, get_current_data_func, split_threshold=50000, max_value=50000, max_splits=4, interval_minutes=4,
+                 default_execution_config: Optional[OrderExecutionConfig] = None):
         """
         :param get_current_data_func: 获取实时数据的函数，签名为 func() -> dict[security, DataFrame]
         :param split_threshold: 小于等于该市值直接一次性按目标持仓下单
         :param max_value : 单笔最大市值（元），用于计算单笔最大股数
         :param max_splits: 最大拆单笔数
         :param interval_minutes: 每笔拆单的时间间隔（分钟）
+        :param default_execution_config: 默认的订单执行配置，如果个别订单没有指定配置则使用此默认配置
         """
         self.get_current_data = get_current_data_func
         self.split_threshold = split_threshold
@@ -151,6 +280,22 @@ class SplitOrderManager:
         self.max_splits = max_splits
         self.interval = datetime.timedelta(minutes=interval_minutes)
         self.pending = []  # 存储 PendingOrder 实例
+        self.default_execution_config = default_execution_config or OrderExecutionConfig()  # 默认执行配置
+
+    def _get_effective_execution_config(self, execution_config: Optional[OrderExecutionConfig]) -> OrderExecutionConfig:
+        """
+        获取有效的执行配置，优先使用传入的配置，否则使用默认配置
+        :param execution_config: 传入的执行配置
+        :return: 有效的执行配置
+        """
+        return execution_config if execution_config is not None else self.default_execution_config
+
+    def get_default_execution_config(self) -> OrderExecutionConfig:
+        """
+        获取当前的默认执行配置
+        :return: 当前默认执行配置
+        """
+        return self.default_execution_config
 
     def _get_price(self, context, security):
         """使用 get_current_data() 获取最新价格"""
@@ -347,7 +492,8 @@ class SplitOrderManager:
             log.info(f"[PendingOrder] {security} 目标市值 {target_value:.2f} 元等于当前市值，无需操作")
             return False
 
-    def _schedule_value(self, context, security, value_legs, sign, target_value, origin=None):
+    def _schedule_value(self, context, security, value_legs, sign, target_value, origin=None,
+                        execution_config: Optional[OrderExecutionConfig] = None):
         """
         第一笔立即下单，后续进入pending队列。若第一笔失败，进入pending并顺延所有pending。
         """
@@ -355,6 +501,12 @@ class SplitOrderManager:
         price = self._get_price(context, security)
         current_pos = self._get_current_position(context, security)
         current_value = current_pos * price
+
+        # 使用有效的执行配置
+        effective_config = self._get_effective_execution_config(execution_config)
+
+        # 确定是否为买入订单
+        is_buy_order = sign > 0
 
         accum = current_value
         first_order_failed = False
@@ -364,7 +516,18 @@ class SplitOrderManager:
             if i == 0:
                 # 立即下第一笔
                 log.info(f"[PendingOrder] 立即执行第1笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum}")
-                po = PendingOrder(mt.order_target_value_, context, security, None, accum, now, i, origin=origin)
+                po = PendingOrder(
+                    mt.order_target_value_,
+                    context,
+                    security,
+                    None,
+                    accum,
+                    now,
+                    i,
+                    origin=origin,
+                    execution_config=effective_config,
+                    is_buy_order=is_buy_order
+                )
                 res = po.execute(context)
                 if not self._is_order_successful(res):
                     # 如果失败，则丢入pending
@@ -382,36 +545,44 @@ class SplitOrderManager:
                     exec_time = now + self.interval * (i + 1)
                 else:
                     exec_time = now + self.interval * i
-                po = PendingOrder(mt.order_target_value_, context, security, None, accum, exec_time, i, origin=origin)
+                po = PendingOrder(
+                    mt.order_target_value_,
+                    context,
+                    security,
+                    None,
+                    accum,
+                    exec_time,
+                    i,
+                    origin=origin,
+                    execution_config=effective_config,
+                    is_buy_order=is_buy_order
+                )
                 if i == len(value_legs) - 1 and target_value == 0:
                     po.sell_all = True
+                    po.is_buy_order = False  # 卖出全部持仓肯定是卖出订单
                 self.pending.append(po)
                 log.info(
                     f"[PendingOrder] 安排第{i + 1}笔{'买入' if sign > 0 else '卖出'}: {security} 目标市值: {accum} 执行时间: {exec_time}")
 
-
-    def place_order_value(self, context, security, target_value):
+    def place_order_value(self, context, security, target_value,
+                          execution_config: Optional[OrderExecutionConfig] = None):
         """
         按市值 target_value 下单: 自动识别买卖方向，并拆分交易。
         :param context: 策略上下文
         :param security: 证券代码
         :param target_value: 目标市值 (元)
+        :param execution_config: 执行配置
         """
         price = self._get_price(context, security)
         if price is None or price <= 0:
             log.error(f"[PendingOrder] 无法获取 {security} 最新价格，跳过")
             return
 
-        # # 目标持仓股数 (100 股单位)
-        # target_shares = int((target_value / price) // 100) * 100
-        # if target_shares < 100 and target_value > 0:
-        #     log.warn(f"[PendingOrder] 金额 {target_value} 对应 <100 股({target_shares}股)，跳过 {security}")
-        #     return
-
         # 当前持仓股数
         current_pos = self._get_current_position(context, security)
         current_value = current_pos * price
-        log.info(f"[PendingOrder] 当前 {security} 持仓: {current_pos}, 市值: {current_value} 元, 目标市值: {target_value} 元")
+        log.info(
+            f"[PendingOrder] 当前 {security} 持仓: {current_pos}, 市值: {current_value} 元, 目标市值: {target_value} 元")
 
         # 检查订单的有效性（买入和卖出）
         if not self._check_order_validity(context, security, target_value):
@@ -420,9 +591,6 @@ class SplitOrderManager:
 
         # 需调整市值 (正买, 负卖)
         delta_value = target_value - current_value
-        # if abs(delta_value) < price * 100:
-        #     log.warn(f"[PendingOrder] {security} 目标市值 {target_value}元, 当前市值 {current_value}元, 差额 <100股市值, 跳过")
-        #     return
 
         # 若市值 ≤ 阈值, 直接调整持仓到目标
         if abs(delta_value) <= self.split_threshold:
@@ -433,7 +601,8 @@ class SplitOrderManager:
         abs_value = abs(delta_value)
         value_slices = self._compute_value_slices(abs_value)
         action = "买入" if delta_value > 0 else "卖出"
-        log.info(f"[PendingOrder] 拆分 {security} {action} 总市值 {abs_value}元 分 {len(value_slices)} 笔: {value_slices}")
+        log.info(
+            f"[PendingOrder] 拆分 {security} {action} 总市值 {abs_value}元 分 {len(value_slices)} 笔: {value_slices}")
 
         sign = 1 if delta_value > 0 else -1
 
@@ -444,19 +613,22 @@ class SplitOrderManager:
             "action": action,
             "security": security,
         }
-        self._schedule_value(context, security, value_slices, sign, target_value, origin=origin_info)
+        self._schedule_value(context, security, value_slices, sign, target_value, origin=origin_info,
+                             execution_config=execution_config)
 
-    def order_target_value_(self, context, security, target_value):
+    def order_target_value_(self, context, security, target_value,
+                            execution_config: Optional[OrderExecutionConfig] = None):
         """与 mysql_trade order_target_value_ 同名接口，按市值拆分下单"""
         log.info(f"[PendingOrder] 请求 {security} 目标市值 {target_value} 元")
-        return self.place_order_value(context, security, target_value)
+        return self.place_order_value(context, security, target_value, execution_config)
 
-    def order_value_(self, context, security, amount):
+    def order_value_(self, context, security, amount, execution_config: Optional[OrderExecutionConfig] = None):
         """与 mysql_trade order_value_ 同名接口，按市值拆分下单
 
         :param context: 策略上下文
         :param security: 证券代码
         :param amount: 交易金额，正数买入，负数卖出
+        :param execution_config: 执行配置
         """
         log.info(f"[PendingOrder] 请求 {security} {'买入' if amount > 0 else '卖出'}市值 {abs(amount)} 元")
 
@@ -472,9 +644,9 @@ class SplitOrderManager:
         # 目标市值 = 当前市值 + 要交易的金额
         target_value = current_value + amount
 
-        return self.place_order_value(context, security, target_value)
+        return self.place_order_value(context, security, target_value, execution_config)
 
-    def order_target_(self, context, security, shares):
+    def order_target_(self, context, security, shares, execution_config: Optional[OrderExecutionConfig] = None):
         """与 mysql_trade order_target_ 同名接口，按目标持仓拆单下单"""
         log.info(f"[PendingOrder] 请求 {security} 目标持仓 {shares} 股")
         price = self._get_price(context, security)
@@ -484,31 +656,28 @@ class SplitOrderManager:
         # 目标持仓股数
         target_shares = shares
         target_value = target_shares * price
-        return self.place_order_value(context, security, target_value)
+        return self.place_order_value(context, security, target_value, execution_config)
 
-    # def order_(self, context, security, shares):
-    #     """与 mysql_trade order_ 同名接口，按需交易股数拆单下单"""
-    #     price = self._get_price(context, security)
-    #     if price is None or price <= 0:
-    #         log.error(f"[PendingOrder] 无法获取 {security} 最新价格，跳过")
-    #         return
-    #     abs_shares = abs(shares)
-    #     if abs_shares < 100:
-    #         log.info(f"[PendingOrder] 请求交易 {abs_shares} 股 <100 股，跳过 {security}")
-    #         return
-    #     # 需买或需卖股数 = shares (正买, 负卖)
-    #     sign = 1 if shares > 0 else -1
-    #     # 单笔最大股数直接用 max_leg 计算的股票数
-    #     # 先获取拆单所需最大股数限制(按市值换算): max_leg_shares
-    #     max_leg_shares = int((self.max_value / price) // 100) * 100
-    #     if max_leg_shares < 100:
-    #         # 无法拆单时，直接一次性下单
-    #         log.info(f"[PendingOrder] max_leg({self.max_value}元) 对应 <100 股，直接下单 {abs_shares} 股 {security}")
-    #         return mt.order(context, security, shares)
-    #     share_legs = self._compute_share_slices(abs_shares, max_leg_shares)
-    #     action = "买入" if shares > 0 else "卖出"
-    #     log.info(f"[PendingOrder] 拆分 {security} {action} 总股数 {abs_shares} 分 {len(share_legs)} 笔: {share_legs}")
-    #     self._schedule_shares(context, security, share_legs, sign)
+    def _cancel_orders_by_policy(self, context):
+        """
+        根据执行策略取消订单
+        :param context: 策略上下文
+        """
+        orders_to_remove = []
+
+        for order in self.pending:
+            should_cancel, reason = order.should_cancel_order(context)
+            if should_cancel:
+                orders_to_remove.append(order)
+                action = "买入" if order.is_buy_order else "卖出"
+                log.info(f"[PendingOrder] 取消{action}订单: {order.security} - {reason} | 原始订单: {order.origin}")
+
+        # 从pending列表中移除取消的订单
+        for order in orders_to_remove:
+            self.pending.remove(order)
+
+        if orders_to_remove:
+            log.info(f"[PendingOrder] 已取消 {len(orders_to_remove)} 个订单")
 
     def execute_pending(self, context):
         """
@@ -516,6 +685,10 @@ class SplitOrderManager:
         若订单执行失败，会重新安排在该股票最后一笔订单之后执行
         """
         from collections import defaultdict
+
+        # 首先检查并取消符合取消策略的订单
+        self._cancel_orders_by_policy(context)
+
         now = context.current_dt
         pending_by_sec = defaultdict(list)
 
@@ -541,7 +714,8 @@ class SplitOrderManager:
                             f"[PendingOrder] 执行 {action} {sec} 股数 {abs(shares)} 时，目标持仓 {target_shares} 股 < 0 | 原始订单: {first_order.origin}")
                         target_shares = 0
                     first_order.shares = target_shares
-                    log.info(f"[PendingOrder] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 股数 {abs(shares)} | 原始订单: {first_order.origin}")
+                    log.info(
+                        f"[PendingOrder] 执行待处理拆单{action}: {sec} 第{first_order.idx + 1}单 股数 {abs(shares)} | 原始订单: {first_order.origin}")
                 elif first_order.value is not None:
                     # 按市值下单 - 这是主要的订单类型
                     current_pos = self._get_current_position(context, sec)
@@ -561,12 +735,12 @@ class SplitOrderManager:
                     res = first_order.execute(context)
 
                     if not self._is_order_successful(res):
-                        log.warn(f"[PendingOrder] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res} | 原始订单: {first_order.origin}")
+                        log.warn(
+                            f"[PendingOrder] 执行 {action} {sec} 订单失败或无成交量，重新安排. Res: {res} | 原始订单: {first_order.origin}")
                         self.reschedule_order(self.pending, sec, self.interval, now, first_order, action)
                 except Exception as e:
                     log.error(f"[PendingOrder] 执行 {action} {sec} 订单异常: {e} | 原始订单: {first_order.origin}")
                     self.reschedule_order(self.pending, sec, self.interval, now, first_order, action)
-            # 否则（未到时间），本轮不处理
 
     def reschedule_order(self, pending_orders, security, interval, current_time, order, action):
         """
@@ -609,7 +783,8 @@ class SplitOrderManager:
         pending_orders[:] = [o for o in pending_orders if o.security != security or o is order]
         pending_orders.append(order)
         pending_orders.extend(others)
-        log.info(f"[PendingOrder] 重新安排失败的{action}订单: {security}, 新执行时间: {order.exec_time} | 原始订单: {order.origin}")
+        log.info(
+            f"[PendingOrder] 重新安排失败的{action}订单: {security}, 新执行时间: {order.exec_time} | 原始订单: {order.origin}")
 
     def get_pending(self):
         """返回待执行订单 (security, shares, exec_time) 列表"""
@@ -689,3 +864,173 @@ class SplitOrderManager:
                  f"可用={balance.available_cash:.2f}")
 
         return balance
+
+
+# 使用示例和工厂函数
+class OrderExecutionConfigFactory:
+    """订单执行配置工厂类，提供常用配置的便捷创建方法"""
+
+    @staticmethod
+    def cancel_buying_next_day():
+        """创建次日取消买入订单的配置"""
+        return OrderExecutionConfig(
+            buy_order_policy=OrderExecutionPolicy.CANCEL_NEXT_DAY,
+            apply_to_buy_orders=True,
+            apply_to_sell_orders=False
+        )
+
+    @staticmethod
+    def cancel_after_hours(hours: int, apply_to_both: bool = True):
+        """创建指定小时后取消的配置"""
+        return OrderExecutionConfig(
+            policy=OrderExecutionPolicy.CANCEL_AFTER_TIME,
+            cancel_after_hours=hours,
+            apply_to_buy_orders=apply_to_both,
+            apply_to_sell_orders=apply_to_both
+        )
+
+    @staticmethod
+    def different_policies_for_buy_sell(buy_policy: OrderExecutionPolicy, sell_policy: OrderExecutionPolicy, **kwargs):
+        """为买入和卖出订单创建不同的策略配置"""
+        return OrderExecutionConfig(
+            buy_order_policy=buy_policy,
+            sell_order_policy=sell_policy,
+            apply_to_buy_orders=True,
+            apply_to_sell_orders=True,
+            **kwargs
+        )
+
+    @staticmethod
+    def custom_condition(condition_func: Callable):
+        """创建自定义条件配置"""
+        return OrderExecutionConfig(
+            policy=OrderExecutionPolicy.CUSTOM_CONDITION,
+            custom_cancel_condition=condition_func
+        )
+
+
+# 使用示例：
+"""
+# 1. 创建带默认配置的SplitOrderManager
+default_config = OrderExecutionConfigFactory.cancel_buying_next_day()
+split_manager = SplitOrderManager(
+    get_current_data_func=get_current_data,
+    default_execution_config=default_config
+)
+
+# 现在所有订单都会自动使用默认配置（次日取消买入订单）
+split_manager.order_target_value_(context, security, 10000)  # 使用默认配置
+split_manager.order_value_(context, security, 5000)  # 使用默认配置
+
+# 2. 临时覆盖默认配置
+special_config = OrderExecutionConfigFactory.max_retries(5)
+split_manager.order_target_value_(context, security, 10000, execution_config=special_config)  # 使用特殊配置
+
+# 3. 运行时更改默认配置
+new_default = OrderExecutionConfigFactory.cancel_after_hours(2)
+split_manager.set_default_execution_config(new_default)
+
+# 现在所有新订单都会使用新的默认配置
+split_manager.order_target_value_(context, security, 10000)  # 使用新默认配置
+
+# 4. 获取当前默认配置
+current_default = split_manager.get_default_execution_config()
+print(f"当前默认策略: {current_default.policy}")
+
+# 5. 不同场景的配置示例：
+
+# 场景A: 保守策略 - 买入订单次日取消，卖出订单最多重试3次
+conservative_config = OrderExecutionConfig(
+    buy_order_policy=OrderExecutionPolicy.CANCEL_NEXT_DAY,
+    sell_order_policy=OrderExecutionPolicy.MAX_RETRIES,
+    max_retries=3,
+    apply_to_buy_orders=True,
+    apply_to_sell_orders=True
+)
+
+# 场景B: 积极策略 - 所有订单最多重试10次
+aggressive_config = OrderExecutionConfig(
+    policy=OrderExecutionPolicy.MAX_RETRIES,
+    max_retries=10
+)
+
+# 场景C: 时间限制策略 - 2小时后取消所有订单
+time_limited_config = OrderExecutionConfig(
+    policy=OrderExecutionPolicy.CANCEL_AFTER_TIME,
+    cancel_after_hours=2
+)
+
+# 场景D: 混合策略 - 买入订单2小时后取消，卖出订单无限重试
+hybrid_config = OrderExecutionConfig(
+    buy_order_policy=OrderExecutionPolicy.CANCEL_AFTER_TIME,
+    sell_order_policy=OrderExecutionPolicy.RETRY_INDEFINITELY,
+    cancel_after_hours=2,
+    apply_to_buy_orders=True,
+    apply_to_sell_orders=True
+)
+
+# 创建不同策略的管理器
+conservative_manager = SplitOrderManager(get_current_data, default_execution_config=conservative_config)
+aggressive_manager = SplitOrderManager(get_current_data, default_execution_config=aggressive_config)
+
+# 6. 自定义取消条件示例
+def market_volatility_condition(order, context):
+    '''如果市场波动率超过5%，取消所有待处理订单'''
+    # 这里可以实现复杂的市场条件判断逻辑
+    # 比如检查VIX指数、价格波动等
+    current_time = context.current_dt
+    market_hours_passed = (current_time - order.first_attempt_time).total_seconds() / 3600
+
+    if market_hours_passed > 4:  # 超过4小时自动取消
+        return True, "超过4个交易小时"
+
+    # 检查价格波动（需要在order中存储原始价格）
+    if hasattr(order.origin, 'original_price'):
+        current_price = context.get_current_data()[order.security].last_price
+        price_change = abs(current_price - order.origin['original_price']) / order.origin['original_price']
+        if price_change > 0.05:
+            return True, f"价格波动超过5%: {price_change:.2%}"
+
+    return False, ""
+
+custom_config = OrderExecutionConfig(
+    policy=OrderExecutionPolicy.CUSTOM_CONDITION,
+    custom_cancel_condition=market_volatility_condition
+)
+
+custom_manager = SplitOrderManager(get_current_data, default_execution_config=custom_config)
+
+# 7. 工厂方法结合SplitOrderManager
+def create_conservative_split_manager(get_current_data_func):
+    '''创建保守型拆单管理器'''
+    config = OrderExecutionConfigFactory.cancel_buying_next_day()
+    return SplitOrderManager(get_current_data_func, default_execution_config=config)
+
+def create_aggressive_split_manager(get_current_data_func, max_retries=10):
+    '''创建积极型拆单管理器'''
+    config = OrderExecutionConfigFactory.max_retries(max_retries)
+    return SplitOrderManager(get_current_data_func, default_execution_config=config)
+
+# 使用工厂方法
+manager = create_conservative_split_manager(get_current_data)
+manager.order_target_value_(context, "000001.XSHE", 100000)  # 自动应用保守策略
+
+# 8. 配置的继承和覆盖优先级：
+# 优先级（从高到低）：
+# 1. 单个订单指定的execution_config参数
+# 2. SplitOrderManager的default_execution_config
+# 3. OrderExecutionConfig()的默认值（RETRY_INDEFINITELY）
+
+# 示例：
+manager_with_default = SplitOrderManager(
+    get_current_data,
+    default_execution_config=OrderExecutionConfigFactory.cancel_buying_next_day()
+)
+
+# 这个订单使用默认配置（次日取消买入）
+manager_with_default.order_target_value_(context, "000001.XSHE", 50000)
+
+# 这个订单使用特殊配置（最多重试5次），覆盖默认配置
+special_config = OrderExecutionConfigFactory.max_retries(5)
+manager_with_default.order_target_value_(context, "000002.XSHE", 50000, execution_config=special_config)
+"""
