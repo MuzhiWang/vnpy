@@ -160,6 +160,15 @@ class PendingOrder:
                     current_time >= self.execution_config.cancel_after_datetime):
                 return True, f"超过指定时间点: {self.execution_config.cancel_after_datetime}"
 
+        elif effective_policy == OrderExecutionPolicy.CUSTOM_CONDITION:
+            if self.execution_config.custom_cancel_condition is not None:
+                try:
+                    should_cancel, reason = self.execution_config.custom_cancel_condition(self, context)
+                    if should_cancel:
+                        return True, f"自定义条件: {reason}"
+                except Exception as e:
+                    log.error(f"[PendingOrder] 自定义取消条件执行失败: {e}")
+
         return False, ""
 
     def execute(self, context=None):
@@ -289,6 +298,14 @@ class SplitOrderManager:
         :return: 有效的执行配置
         """
         return execution_config if execution_config is not None else self.default_execution_config
+
+    def set_default_execution_config(self, config: OrderExecutionConfig):
+        """
+        设置默认执行配置
+        :param config: 新的默认执行配置
+        """
+        self.default_execution_config = config
+        log.info(f"[PendingOrder] 已更新默认执行配置: {config.policy}")
 
     def get_default_execution_config(self) -> OrderExecutionConfig:
         """
@@ -871,6 +888,13 @@ class OrderExecutionConfigFactory:
     """订单执行配置工厂类，提供常用配置的便捷创建方法"""
 
     @staticmethod
+    def default():
+        """创建默认配置（跟随pending队列，无特殊逻辑）"""
+        return OrderExecutionConfig(
+            policy=OrderExecutionPolicy.DEFAULT
+        )
+
+    @staticmethod
     def cancel_buying_next_day():
         """创建次日取消买入订单的配置"""
         return OrderExecutionConfig(
@@ -911,59 +935,56 @@ class OrderExecutionConfigFactory:
 
 # 使用示例：
 """
-# 1. 创建带默认配置的SplitOrderManager
-default_config = OrderExecutionConfigFactory.cancel_buying_next_day()
+# 1. 创建带默认配置的SplitOrderManager（默认行为，跟随pending队列）
+default_config = OrderExecutionConfigFactory.default()
 split_manager = SplitOrderManager(
     get_current_data_func=get_current_data,
     default_execution_config=default_config
 )
 
-# 现在所有订单都会自动使用默认配置（次日取消买入订单）
+# 所有订单都会跟随正常的pending队列逻辑，无特殊取消条件
 split_manager.order_target_value_(context, security, 10000)  # 使用默认配置
 split_manager.order_value_(context, security, 5000)  # 使用默认配置
 
-# 2. 临时覆盖默认配置
-special_config = OrderExecutionConfigFactory.max_retries(5)
-split_manager.order_target_value_(context, security, 10000, execution_config=special_config)  # 使用特殊配置
+# 2. 次日取消买入订单的配置
+cancel_buy_config = OrderExecutionConfigFactory.cancel_buying_next_day()
+split_manager.order_target_value_(context, security, 10000, execution_config=cancel_buy_config)
 
-# 3. 运行时更改默认配置
-new_default = OrderExecutionConfigFactory.cancel_after_hours(2)
+# 3. 指定时间后取消
+time_config = OrderExecutionConfigFactory.cancel_after_hours(2)
+split_manager.order_target_value_(context, security, 10000, execution_config=time_config)
+
+# 4. 运行时更改默认配置
+new_default = OrderExecutionConfigFactory.cancel_buying_next_day()
 split_manager.set_default_execution_config(new_default)
 
-# 现在所有新订单都会使用新的默认配置
+# 现在所有新的买入订单都会在次日取消
 split_manager.order_target_value_(context, security, 10000)  # 使用新默认配置
 
-# 4. 获取当前默认配置
+# 5. 获取当前默认配置
 current_default = split_manager.get_default_execution_config()
 print(f"当前默认策略: {current_default.policy}")
 
-# 5. 不同场景的配置示例：
+# 6. 不同场景的配置示例：
 
-# 场景A: 保守策略 - 买入订单次日取消，卖出订单最多重试3次
+# 场景A: 保守策略 - 买入订单次日取消，卖出订单默认行为
 conservative_config = OrderExecutionConfig(
     buy_order_policy=OrderExecutionPolicy.CANCEL_NEXT_DAY,
-    sell_order_policy=OrderExecutionPolicy.MAX_RETRIES,
-    max_retries=3,
+    sell_order_policy=OrderExecutionPolicy.DEFAULT,
     apply_to_buy_orders=True,
     apply_to_sell_orders=True
 )
 
-# 场景B: 积极策略 - 所有订单最多重试10次
-aggressive_config = OrderExecutionConfig(
-    policy=OrderExecutionPolicy.MAX_RETRIES,
-    max_retries=10
-)
-
-# 场景C: 时间限制策略 - 2小时后取消所有订单
+# 场景B: 时间限制策略 - 2小时后取消所有订单
 time_limited_config = OrderExecutionConfig(
     policy=OrderExecutionPolicy.CANCEL_AFTER_TIME,
     cancel_after_hours=2
 )
 
-# 场景D: 混合策略 - 买入订单2小时后取消，卖出订单无限重试
+# 场景C: 混合策略 - 买入订单2小时后取消，卖出订单默认行为
 hybrid_config = OrderExecutionConfig(
     buy_order_policy=OrderExecutionPolicy.CANCEL_AFTER_TIME,
-    sell_order_policy=OrderExecutionPolicy.RETRY_INDEFINITELY,
+    sell_order_policy=OrderExecutionPolicy.DEFAULT,
     cancel_after_hours=2,
     apply_to_buy_orders=True,
     apply_to_sell_orders=True
@@ -971,13 +992,10 @@ hybrid_config = OrderExecutionConfig(
 
 # 创建不同策略的管理器
 conservative_manager = SplitOrderManager(get_current_data, default_execution_config=conservative_config)
-aggressive_manager = SplitOrderManager(get_current_data, default_execution_config=aggressive_config)
 
-# 6. 自定义取消条件示例
+# 7. 自定义取消条件示例
 def market_volatility_condition(order, context):
     '''如果市场波动率超过5%，取消所有待处理订单'''
-    # 这里可以实现复杂的市场条件判断逻辑
-    # 比如检查VIX指数、价格波动等
     current_time = context.current_dt
     market_hours_passed = (current_time - order.first_attempt_time).total_seconds() / 3600
 
@@ -1000,26 +1018,31 @@ custom_config = OrderExecutionConfig(
 
 custom_manager = SplitOrderManager(get_current_data, default_execution_config=custom_config)
 
-# 7. 工厂方法结合SplitOrderManager
+# 8. 工厂方法结合SplitOrderManager
+def create_default_split_manager(get_current_data_func):
+    '''创建默认型拆单管理器（正常pending队列行为）'''
+    config = OrderExecutionConfigFactory.default()
+    return SplitOrderManager(get_current_data_func, default_execution_config=config)
+
 def create_conservative_split_manager(get_current_data_func):
-    '''创建保守型拆单管理器'''
+    '''创建保守型拆单管理器（买入订单次日取消）'''
     config = OrderExecutionConfigFactory.cancel_buying_next_day()
     return SplitOrderManager(get_current_data_func, default_execution_config=config)
 
-def create_aggressive_split_manager(get_current_data_func, max_retries=10):
-    '''创建积极型拆单管理器'''
-    config = OrderExecutionConfigFactory.max_retries(max_retries)
+def create_time_limited_split_manager(get_current_data_func, hours=2):
+    '''创建时间限制型拆单管理器（指定小时后取消）'''
+    config = OrderExecutionConfigFactory.cancel_after_hours(hours)
     return SplitOrderManager(get_current_data_func, default_execution_config=config)
 
 # 使用工厂方法
 manager = create_conservative_split_manager(get_current_data)
 manager.order_target_value_(context, "000001.XSHE", 100000)  # 自动应用保守策略
 
-# 8. 配置的继承和覆盖优先级：
+# 9. 配置的继承和覆盖优先级：
 # 优先级（从高到低）：
 # 1. 单个订单指定的execution_config参数
 # 2. SplitOrderManager的default_execution_config
-# 3. OrderExecutionConfig()的默认值（RETRY_INDEFINITELY）
+# 3. OrderExecutionConfig()的默认值（DEFAULT策略，跟随pending队列）
 
 # 示例：
 manager_with_default = SplitOrderManager(
@@ -1030,7 +1053,15 @@ manager_with_default = SplitOrderManager(
 # 这个订单使用默认配置（次日取消买入）
 manager_with_default.order_target_value_(context, "000001.XSHE", 50000)
 
-# 这个订单使用特殊配置（最多重试5次），覆盖默认配置
-special_config = OrderExecutionConfigFactory.max_retries(5)
+# 这个订单使用特殊配置（2小时后取消），覆盖默认配置
+special_config = OrderExecutionConfigFactory.cancel_after_hours(2)
 manager_with_default.order_target_value_(context, "000002.XSHE", 50000, execution_config=special_config)
+
+# 10. 简化的策略类型：
+# - DEFAULT: 跟随正常pending队列，无特殊取消逻辑
+# - CANCEL_NEXT_DAY: 次日取消
+# - CANCEL_AFTER_TIME: 指定时间后取消
+# - CUSTOM_CONDITION: 自定义取消条件
+
+# 所有策略都基于取消机制，无重试计数或复杂逻辑
 """
