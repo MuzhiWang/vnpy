@@ -127,7 +127,7 @@ class PendingOrder:
             # 对于基于市值的订单，必须明确指定买卖方向
             raise ValueError(f"[PendingOrder] 无法确定订单 {security} 的买卖方向，必须明确指定 is_buy_order 参数")
 
-    def should_cancel_order(self, context) -> tuple[bool, str]:
+    def should_cancel_order(self, context):
         """
         检查订单是否应该被取消
         :param context: 策略上下文

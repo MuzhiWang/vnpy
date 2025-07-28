@@ -7,7 +7,7 @@ from kuanke.wizard import *
 from six import StringIO, BytesIO
 from mysqltrade import *
 from jqfactor import get_factor_values
-from split_order_manager import SplitOrderManager
+from split_order_manager import SplitOrderManager, OrderExecutionConfig, OrderExecutionPolicy
 
 
 def after_code_changed(context):
@@ -27,13 +27,22 @@ def after_code_changed(context):
     g.max_single_order = 50000  # 每笔最大拆单金额（元）
     g.max_splits = 4  # 最大拆单笔数
     g.split_interval_minutes = 1  # 拆单间隔（分钟）
+
     # 实例化拆单管理器
+    # 保守策略 - 买入订单次日取消，卖出订单默认行为
+    conservative_config = OrderExecutionConfig(
+        buy_order_policy=OrderExecutionPolicy.CANCEL_NEXT_DAY,
+        sell_order_policy=OrderExecutionPolicy.DEFAULT,
+        apply_to_buy_orders=True,
+        apply_to_sell_orders=True
+    )
     g.som = SplitOrderManager(
         get_current_data_func=get_current_data_for_security,
         split_threshold=g.split_order_threshold,
         max_value=g.max_single_order,
         max_splits=g.max_splits,
-        interval_minutes=g.split_interval_minutes
+        interval_minutes=g.split_interval_minutes,
+        default_execution_config=conservative_config,
     )
 
     # 设定基准
